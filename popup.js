@@ -47,9 +47,28 @@ function setDefaultDates() {
   el("startDate").value = localDate(yearAgo);
 }
 
+async function ensureMemoryMode() {
+  ensureKidsNoteTab();
+
+  let response;
+  try {
+    response = await chrome.tabs.sendMessage(activeTab.id, { type: "KIDSNOTE_ENSURE_MEMORY_MODE" });
+  } catch (error) {
+    throw new Error("KidsNote 페이지와 연결할 수 없습니다. 페이지를 새로고침한 뒤 다시 시도하세요.");
+  }
+
+  if (!response?.ok) {
+    throw new Error(response?.error || "추억보기 상태 확인에 실패했습니다.");
+  }
+
+  return response;
+}
+
 async function detectChild() {
   ensureKidsNoteTab();
   clearError();
+  await ensureMemoryMode();
+
   const response = await send("DETECT_CHILD", { tabId: activeTab.id });
   if (!response.ok) throw new Error(response.error || "Child ID 자동 감지 실패");
   if (!response.childId) throw new Error("Child ID를 찾지 못했습니다. 알림장 목록을 연 뒤 다시 시도하거나 직접 입력하세요.");
@@ -59,6 +78,8 @@ async function detectChild() {
 async function startBackup() {
   ensureKidsNoteTab();
   clearError();
+  await ensureMemoryMode();
+
   const payload = {
     tabId: activeTab.id,
     childId: el("childId").value.trim(),
