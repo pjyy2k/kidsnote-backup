@@ -49,11 +49,13 @@ async function startJob(payload) {
     cursor: null,
     currentDate: null,
     processedReportIds: [],
+    photoSequenceByDate: {},
     counts: { pages: 0, reports: 0, images: 0, metadata: 0, failed: 0 },
     options: {
       photos: payload.options?.photos !== false,
       json: payload.options?.json !== false,
-      markdown: payload.options?.markdown !== false
+      markdown: payload.options?.markdown !== false,
+      photoFolderMode: payload.options?.photoFolderMode === "flat" ? "flat" : "date"
     },
     startedAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
@@ -160,20 +162,25 @@ async function processNextPage() {
 async function backupReport(report, job) {
   const child = sanitize(report.child_name || `child-${job.childId}`);
   const date = report.date_written;
-  const year = date.slice(0, 4);
-  const base = `KidsNote/${child}/${year}/${date}/${report.id}`;
+  const root = `KidsNote/${child}`;
 
   if (job.options.photos) {
     const images = Array.isArray(report.attached_images) ? report.attached_images : [];
-    for (let i = 0; i < images.length; i += 1) {
-      const image = images[i];
+    let sequence = Number(job.photoSequenceByDate?.[date] || 0);
+
+    for (const image of images) {
       if (!image?.original) continue;
+      sequence += 1;
       const ext = extensionOf(image.original_file_name || image.original) || "jpg";
-      const suffix = image.id ? `_${image.id}` : "";
+      const serial = String(sequence).padStart(3, "0");
+      const photoRoot = job.options.photoFolderMode === "flat"
+        ? `${root}/Photos`
+        : `${root}/Photos/${date}`;
+
       try {
         await chrome.downloads.download({
           url: image.original,
-          filename: `${base}/${String(i + 1).padStart(3, "0")}${suffix}.${ext}`,
+          filename: `${photoRoot}/${date}-${serial}.${ext}`,
           conflictAction: "overwrite",
           saveAs: false
         });
@@ -183,11 +190,18 @@ async function backupReport(report, job) {
         job.counts.failed += 1;
       }
     }
+
+    job.photoSequenceByDate = job.photoSequenceByDate || {};
+    job.photoSequenceByDate[date] = sequence;
   }
 
   const metadata = makeMetadata(report);
-  if (job.options.json) await saveMetadata(job, `${base}/report.json`, JSON.stringify(metadata, null, 2), "application/json");
-  if (job.options.markdown) await saveMetadata(job, `${base}/report.md`, makeMarkdown(metadata), "text/markdown");
+  if (job.options.markdown) {
+    await saveMetadata(job, `${root}/Diary/${date}.md`, makeMarkdown(metadata), "text/markdown");
+  }
+  if (job.options.json) {
+    await saveMetadata(job, `${root}/JSON/${date}.json`, JSON.stringify(metadata, null, 2), "application/json");
+  }
 }
 
 async function saveMetadata(job, filename, text, type) {
@@ -251,7 +265,9 @@ function makeMarkdown(meta) {
     "## 첨부 사진",
     ""
   ];
-  for (const image of meta.attached_images) lines.push(`- ${String(image.index).padStart(3, "0")}: ${image.original || "-"}`);
+  for (const image of meta.attached_images) {
+    lines.push(`- ${String(image.index).padStart(3, "0")}: ${image.original || "-"}`);
+  }
   return `${lines.join("\n")}\n`;
 }
 
@@ -261,6 +277,9 @@ function validatePayload(payload) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(payload.startDate || "")) throw new Error("시작일을 확인하세요.");
   if (!/^\d{4}-\d{2}-\d{2}$/.test(payload.endDate || "")) throw new Error("종료일을 확인하세요.");
   if (payload.startDate > payload.endDate) throw new Error("시작일은 종료일보다 늦을 수 없습니다.");
+  if (payload.options?.photoFolderMode && !["date", "flat"].includes(payload.options.photoFolderMode)) {
+    throw new Error("사진 저장 방식을 확인하세요.");
+  }
 }
 
 function sanitize(value) {
