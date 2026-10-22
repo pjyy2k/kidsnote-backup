@@ -10,6 +10,7 @@ async function init() {
   activeTab = tab || null;
   setDefaultDates();
   bindEvents();
+  updateFolderExample();
   await refreshState();
   if (activeTab?.url?.startsWith("https://www.kidsnote.com/")) await detectChild();
 }
@@ -20,6 +21,8 @@ function bindEvents() {
   el("pauseBtn").addEventListener("click", () => send("PAUSE").then(refreshState).catch(showError));
   el("resumeBtn").addEventListener("click", () => send("RESUME").then(refreshState).catch(showError));
   el("cancelBtn").addEventListener("click", () => send("CANCEL").then(refreshState).catch(showError));
+  el("photoModeDate").addEventListener("change", updateFolderExample);
+  el("photoModeFlat").addEventListener("change", updateFolderExample);
 }
 
 function setDefaultDates() {
@@ -50,12 +53,25 @@ async function startBackup() {
     options: {
       photos: el("photos").checked,
       json: el("json").checked,
-      markdown: el("markdown").checked
+      markdown: el("markdown").checked,
+      photoFolderMode: selectedPhotoFolderMode()
     }
   };
   const response = await send("START", { payload });
   if (!response.ok) throw new Error(response.error || "백업 시작 실패");
   render(response.job);
+}
+
+function selectedPhotoFolderMode() {
+  return document.querySelector('input[name="photoFolderMode"]:checked')?.value || "date";
+}
+
+function updateFolderExample() {
+  if (selectedPhotoFolderMode() === "flat") {
+    el("folderExample").textContent = "Photos/2026-10-21-001.jpg\nPhotos/2026-10-21-002.jpg";
+  } else {
+    el("folderExample").textContent = "Photos/2026-10-21/2026-10-21-001.jpg\nPhotos/2026-10-21/2026-10-21-002.jpg";
+  }
 }
 
 async function refreshState() {
