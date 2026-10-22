@@ -4,7 +4,9 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>KidsNote Backup</title>
-  <link rel="stylesheet" href="popup.css">
+  <style>
+    body{font-family:sans-serif;min-width:360px;margin:0;background:#f6f7f9;color:#222}.app{padding:16px}.panel{padding:12px;border:1px solid #ddd;border-radius:10px;margin-bottom:12px;background:#fff}h1{margin:0 0 4px}.inline,.actions{display:flex;gap:8px}.inline input{flex:1}.dates,.stats{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:12px}.stats{grid-template-columns:repeat(4,1fr)}label{font-size:13px;font-weight:600}input{box-sizing:border-box;width:100%;padding:8px;border:1px solid #ccc;border-radius:7px}fieldset{border:0;padding:0;margin:14px 0}.check{font-weight:400;margin-right:8px}.check input{width:auto}button{padding:8px 10px;border:0;border-radius:7px;cursor:pointer}.primary{width:100%;background:#2563eb;color:#fff;font-weight:700}.secondary{background:#eef2f6}.danger{background:#fee4e2;color:#b42318}.status-row{display:flex;justify-content:space-between;padding:3px 0;font-size:13px}.stats div{text-align:center;background:#f8fafc;padding:8px;border-radius:7px}.stats span,.hint,header p,footer{color:#667085;font-size:11px}.stats strong{display:block;font-size:16px}.actions button{flex:1}.error{background:#fff1f0;color:#b42318;padding:8px;border-radius:7px;font-size:12px}footer{text-align:center}
+  </style>
 </head>
 <body>
   <main class="app">
@@ -12,7 +14,6 @@
       <h1>KidsNote Backup</h1>
       <p>알림장과 원본 사진을 날짜별로 백업합니다.</p>
     </header>
-
     <section class="panel">
       <label for="childId">Child ID</label>
       <div class="inline">
@@ -20,23 +21,19 @@
         <button id="detectBtn" type="button" class="secondary">자동 감지</button>
       </div>
       <p class="hint">KidsNote 알림장 목록을 열어둔 상태에서 자동 감지를 누르세요.</p>
-
       <div class="dates">
         <label>시작일<input id="startDate" type="date"></label>
         <label>종료일<input id="endDate" type="date"></label>
       </div>
-
       <fieldset>
         <legend>백업 항목</legend>
         <label class="check"><input id="photos" type="checkbox" checked> 원본 사진</label>
         <label class="check"><input id="json" type="checkbox" checked> JSON</label>
         <label class="check"><input id="markdown" type="checkbox" checked> Markdown</label>
       </fieldset>
-
       <button id="startBtn" type="button" class="primary">백업 시작</button>
     </section>
-
-    <section class="panel status-panel" aria-live="polite">
+    <section class="panel" aria-live="polite">
       <div class="status-row"><span>상태</span><strong id="status">대기</strong></div>
       <div class="status-row"><span>현재 날짜</span><strong id="currentDate">-</strong></div>
       <div class="stats">
@@ -52,7 +49,6 @@
         <button id="cancelBtn" type="button" class="danger">취소</button>
       </div>
     </section>
-
     <footer>저장 위치: Chrome 기본 다운로드 폴더 / KidsNote</footer>
   </main>
   <script src="popup.js"></script>
