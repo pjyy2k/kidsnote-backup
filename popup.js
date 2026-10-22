@@ -16,6 +16,7 @@ async function init() {
 }
 
 function bindEvents() {
+  el("openReportBtn").addEventListener("click", () => openKidsNoteReport().catch(showError));
   el("detectBtn").addEventListener("click", () => detectChild().catch(showError));
   el("startBtn").addEventListener("click", () => startBackup().catch(showError));
   el("pauseBtn").addEventListener("click", () => send("PAUSE").then(refreshState).catch(showError));
@@ -23,6 +24,19 @@ function bindEvents() {
   el("cancelBtn").addEventListener("click", () => send("CANCEL").then(refreshState).catch(showError));
   el("photoModeDate").addEventListener("change", updateFolderExample);
   el("photoModeFlat").addEventListener("change", updateFolderExample);
+}
+
+async function openKidsNoteReport() {
+  clearError();
+  const url = "https://www.kidsnote.com/service/report";
+
+  if (activeTab?.id && activeTab.url?.startsWith("https://www.kidsnote.com/")) {
+    activeTab = await chrome.tabs.update(activeTab.id, { url, active: true });
+  } else {
+    activeTab = await chrome.tabs.create({ url, active: true });
+  }
+
+  window.close();
 }
 
 function setDefaultDates() {
@@ -101,7 +115,7 @@ function render(job) {
 
 function ensureKidsNoteTab() {
   if (!activeTab?.id || !activeTab.url?.startsWith("https://www.kidsnote.com/")) {
-    throw new Error("로그인된 KidsNote 탭을 먼저 열어주세요.");
+    throw new Error("1단계에서 KidsNote 알림장 화면을 먼저 열어주세요.");
   }
 }
 
