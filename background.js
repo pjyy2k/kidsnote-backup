@@ -1,6 +1,9 @@
 const JOB_KEY = "kidsnoteBackupJob";
 const ALARM_NAME = "kidsnoteBackupNext";
 
+let mutationQueue = Promise.resolve();
+let processing = false;
+
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   handleMessage(message)
     .then(sendResponse)
@@ -9,7 +12,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 });
 
 chrome.alarms.onAlarm.addListener((alarm) => {
-  if (alarm.name === ALARM_NAME) processNextPage().catch(failJob);
+  if (alarm.name === ALARM_NAME) {
+    processNextPage().catch((error) => console.error("Backup page failed", error));
+  }
 });
 
 async function handleMessage(message) {
@@ -40,7 +45,10 @@ async function startJob(payload) {
   validatePayload(payload);
   await chrome.alarms.clear(ALARM_NAME);
 
+  const now = new Date().toISOString();
   const job = {
+    jobId: makeToken(),
+    runToken: makeToken(),
     status: "running",
     tabId: payload.tabId,
     childId: String(payload.childId),
@@ -57,119 +65,166 @@ async function startJob(payload) {
       markdown: payload.options?.markdown !== false,
       photoFolderMode: payload.options?.photoFolderMode === "flat" ? "flat" : "date"
     },
-    startedAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
+    startedAt: now,
+    updatedAt: now,
     error: null
   };
 
-  await saveJob(job);
+  await replaceJob(job);
   scheduleNext(100);
   return { ok: true, job };
 }
 
 async function pauseJob() {
-  const job = await getJob();
   await chrome.alarms.clear(ALARM_NAME);
-  if (!job) return { ok: true, job: null };
-  job.status = "paused";
-  job.updatedAt = new Date().toISOString();
-  await saveJob(job);
+  const job = await mutateJob((current) => {
+    if (!current) return current;
+    if (["completed", "cancelled"].includes(current.status)) return current;
+
+    current.status = "paused";
+    current.runToken = makeToken();
+    current.updatedAt = new Date().toISOString();
+    return current;
+  });
   return { ok: true, job };
 }
 
 async function resumeJob() {
-  const job = await getJob();
-  if (!job) throw new Error("저장된 백업 작업이 없습니다.");
-  if (["completed", "cancelled"].includes(job.status)) {
-    throw new Error("이미 종료된 작업입니다. 새 백업을 시작하세요.");
-  }
-  job.status = "running";
-  job.error = null;
-  job.updatedAt = new Date().toISOString();
-  await saveJob(job);
+  const job = await mutateJob((current) => {
+    if (!current) throw new Error("저장된 백업 작업이 없습니다.");
+    if (["completed", "cancelled"].includes(current.status)) {
+      throw new Error("이미 종료된 작업입니다. 새 백업을 시작하세요.");
+    }
+
+    current.jobId = current.jobId || makeToken();
+    current.runToken = makeToken();
+    current.status = "running";
+    current.error = null;
+    current.updatedAt = new Date().toISOString();
+    return current;
+  });
+
+  await chrome.alarms.clear(ALARM_NAME);
   scheduleNext(100);
   return { ok: true, job };
 }
 
 async function cancelJob() {
-  const job = await getJob();
   await chrome.alarms.clear(ALARM_NAME);
-  if (!job) return { ok: true, job: null };
-  job.status = "cancelled";
-  job.updatedAt = new Date().toISOString();
-  await saveJob(job);
+  const job = await mutateJob((current) => {
+    if (!current) return current;
+    if (current.status === "completed") return current;
+
+    current.status = "cancelled";
+    current.runToken = makeToken();
+    current.currentDate = null;
+    current.updatedAt = new Date().toISOString();
+    return current;
+  });
   return { ok: true, job };
 }
 
 async function processNextPage() {
-  const job = await getJob();
-  if (!job || job.status !== "running") return;
+  if (processing) return;
+  processing = true;
+
+  let jobId = null;
+  let runToken = null;
 
   try {
-    const response = await chrome.tabs.sendMessage(job.tabId, {
+    const snapshot = await ensureRunningJobIdentity();
+    if (!snapshot || snapshot.status !== "running") return;
+
+    jobId = snapshot.jobId;
+    runToken = snapshot.runToken;
+
+    const response = await chrome.tabs.sendMessage(snapshot.tabId, {
       type: "KIDSNOTE_FETCH_PAGE",
-      childId: job.childId,
-      page: job.cursor
+      childId: snapshot.childId,
+      page: snapshot.cursor
     });
 
+    if (!(await isRunActive(jobId, runToken))) return;
     if (!response?.ok) throw new Error(response?.error || "목록 API 호출에 실패했습니다.");
 
-    const page = response.data;
-    const processed = new Set(job.processedReportIds || []);
+    const page = response.data || {};
     let reachedStart = false;
 
     for (const report of page.results || []) {
-      const latest = await getJob();
-      if (!latest || latest.status !== "running") return;
+      if (!(await isRunActive(jobId, runToken))) return;
+
+      const current = await getJob();
+      if (!current || current.jobId !== jobId || current.runToken !== runToken || current.status !== "running") return;
 
       const date = String(report.date_written || "");
       if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) continue;
-      if (date > job.endDate) continue;
-      if (date < job.startDate) {
+      if (date > current.endDate) continue;
+      if (date < current.startDate) {
         reachedStart = true;
         break;
       }
-      if (processed.has(String(report.id))) continue;
+      if ((current.processedReportIds || []).includes(String(report.id))) continue;
 
-      job.currentDate = date;
-      await backupReport(report, job);
-      processed.add(String(report.id));
-      job.processedReportIds = [...processed];
-      job.counts.reports += 1;
-      job.updatedAt = new Date().toISOString();
-      await saveJob(job);
+      await setCurrentDate(jobId, runToken, date);
+      const result = await backupReport(report, current, jobId, runToken);
+      if (!result.completed) return;
+
+      const committed = await commitReportProgress(jobId, runToken, report, result);
+      if (!committed) return;
     }
 
-    job.counts.pages += 1;
-    job.updatedAt = new Date().toISOString();
+    if (!(await isRunActive(jobId, runToken))) return;
 
     if (reachedStart || !page.next) {
-      job.status = "completed";
-      job.cursor = null;
-      job.currentDate = null;
-      await saveJob(job);
+      await mutateJob((current) => {
+        if (!matchesActiveRun(current, jobId, runToken)) return current;
+        current.counts.pages += 1;
+        current.status = "completed";
+        current.cursor = null;
+        current.currentDate = null;
+        current.updatedAt = new Date().toISOString();
+        return current;
+      });
+      await chrome.alarms.clear(ALARM_NAME);
       return;
     }
 
-    job.cursor = page.next;
-    await saveJob(job);
-    scheduleNext(700);
+    const updated = await mutateJob((current) => {
+      if (!matchesActiveRun(current, jobId, runToken)) return current;
+      current.counts.pages += 1;
+      current.cursor = page.next;
+      current.currentDate = null;
+      current.updatedAt = new Date().toISOString();
+      return current;
+    });
+
+    if (matchesActiveRun(updated, jobId, runToken)) scheduleNext(700);
   } catch (error) {
-    await failJob(error);
+    if (jobId && runToken && (await isRunActive(jobId, runToken))) {
+      await failJob(error, jobId, runToken);
+    }
+  } finally {
+    processing = false;
+    await ensureRunningJobHasAlarm();
   }
 }
 
-async function backupReport(report, job) {
+async function backupReport(report, job, jobId, runToken) {
   const child = sanitize(report.child_name || `child-${job.childId}`);
   const date = report.date_written;
   const root = `KidsNote/${child}`;
+  const countsDelta = { images: 0, metadata: 0, failed: 0 };
+  let sequence = Number(job.photoSequenceByDate?.[date] || 0);
 
   if (job.options.photos) {
     const images = Array.isArray(report.attached_images) ? report.attached_images : [];
-    let sequence = Number(job.photoSequenceByDate?.[date] || 0);
 
     for (const image of images) {
+      if (!(await isRunActive(jobId, runToken))) {
+        return { completed: false };
+      }
       if (!image?.original) continue;
+
       sequence += 1;
       const ext = extensionOf(image.original_file_name || image.original) || "jpg";
       const serial = String(sequence).padStart(3, "0");
@@ -184,35 +239,89 @@ async function backupReport(report, job) {
           conflictAction: "overwrite",
           saveAs: false
         });
-        job.counts.images += 1;
+        countsDelta.images += 1;
       } catch (error) {
         console.warn("Image download failed", error);
-        job.counts.failed += 1;
+        countsDelta.failed += 1;
       }
     }
-
-    job.photoSequenceByDate = job.photoSequenceByDate || {};
-    job.photoSequenceByDate[date] = sequence;
   }
+
+  if (!(await isRunActive(jobId, runToken))) return { completed: false };
 
   const metadata = makeMetadata(report);
+
   if (job.options.markdown) {
-    await saveMetadata(job, `${root}/Diary/${date}.md`, makeMarkdown(metadata), "text/markdown");
+    const ok = await saveMetadataFile(`${root}/Diary/${date}.md`, makeMarkdown(metadata), "text/markdown");
+    if (ok) countsDelta.metadata += 1;
+    else countsDelta.failed += 1;
   }
+
+  if (!(await isRunActive(jobId, runToken))) return { completed: false };
+
   if (job.options.json) {
-    await saveMetadata(job, `${root}/JSON/${date}.json`, JSON.stringify(metadata, null, 2), "application/json");
+    const ok = await saveMetadataFile(`${root}/JSON/${date}.json`, JSON.stringify(metadata, null, 2), "application/json");
+    if (ok) countsDelta.metadata += 1;
+    else countsDelta.failed += 1;
+  }
+
+  return {
+    completed: await isRunActive(jobId, runToken),
+    sequence,
+    countsDelta
+  };
+}
+
+async function saveMetadataFile(filename, text, type) {
+  try {
+    const url = `data:${type};charset=utf-8,${encodeURIComponent(text)}`;
+    await chrome.downloads.download({
+      url,
+      filename,
+      conflictAction: "overwrite",
+      saveAs: false
+    });
+    return true;
+  } catch (error) {
+    console.warn("Metadata download failed", error);
+    return false;
   }
 }
 
-async function saveMetadata(job, filename, text, type) {
-  try {
-    const url = `data:${type};charset=utf-8,${encodeURIComponent(text)}`;
-    await chrome.downloads.download({ url, filename, conflictAction: "overwrite", saveAs: false });
-    job.counts.metadata += 1;
-  } catch (error) {
-    console.warn("Metadata download failed", error);
-    job.counts.failed += 1;
-  }
+async function setCurrentDate(jobId, runToken, date) {
+  await mutateJob((current) => {
+    if (!matchesActiveRun(current, jobId, runToken)) return current;
+    current.currentDate = date;
+    current.updatedAt = new Date().toISOString();
+    return current;
+  });
+}
+
+async function commitReportProgress(jobId, runToken, report, result) {
+  let committed = false;
+
+  await mutateJob((current) => {
+    if (!matchesActiveRun(current, jobId, runToken)) return current;
+
+    const reportId = String(report.id);
+    const processed = new Set(current.processedReportIds || []);
+    if (!processed.has(reportId)) {
+      processed.add(reportId);
+      current.processedReportIds = [...processed];
+      current.counts.reports += 1;
+      current.counts.images += result.countsDelta.images;
+      current.counts.metadata += result.countsDelta.metadata;
+      current.counts.failed += result.countsDelta.failed;
+      current.photoSequenceByDate = current.photoSequenceByDate || {};
+      current.photoSequenceByDate[report.date_written] = result.sequence;
+    }
+
+    current.updatedAt = new Date().toISOString();
+    committed = true;
+    return current;
+  });
+
+  return committed;
 }
 
 function makeMetadata(report) {
@@ -265,9 +374,11 @@ function makeMarkdown(meta) {
     "## 첨부 사진",
     ""
   ];
+
   for (const image of meta.attached_images) {
     lines.push(`- ${String(image.index).padStart(3, "0")}: ${image.original || "-"}`);
   }
+
   return `${lines.join("\n")}\n`;
 }
 
@@ -283,7 +394,11 @@ function validatePayload(payload) {
 }
 
 function sanitize(value) {
-  return String(value).replace(/[<>:"/\\|?*\u0000-\u001F]/g, "_").replace(/[. ]+$/g, "").trim().slice(0, 100) || "unknown";
+  return String(value)
+    .replace(/[<>:"/\\|?*\u0000-\u001F]/g, "_")
+    .replace(/[. ]+$/g, "")
+    .trim()
+    .slice(0, 100) || "unknown";
 }
 
 function extensionOf(value) {
@@ -291,24 +406,82 @@ function extensionOf(value) {
   return match ? match[1].toLowerCase() : null;
 }
 
+function makeToken() {
+  return crypto.randomUUID();
+}
+
+function matchesActiveRun(job, jobId, runToken) {
+  return Boolean(
+    job &&
+    job.status === "running" &&
+    job.jobId === jobId &&
+    job.runToken === runToken
+  );
+}
+
 function scheduleNext(delay) {
   chrome.alarms.create(ALARM_NAME, { when: Date.now() + delay });
 }
 
-async function failJob(error) {
+async function ensureRunningJobHasAlarm() {
   const job = await getJob();
-  if (!job) return;
-  job.status = "error";
-  job.error = error?.message || String(error);
-  job.updatedAt = new Date().toISOString();
-  await chrome.alarms.clear(ALARM_NAME);
-  await saveJob(job);
+  if (!job || job.status !== "running") return;
+
+  const alarm = await chrome.alarms.get(ALARM_NAME);
+  if (!alarm) scheduleNext(150);
 }
 
-async function getJob() {
+async function failJob(error, jobId, runToken) {
+  let changed = false;
+
+  await mutateJob((current) => {
+    if (!matchesActiveRun(current, jobId, runToken)) return current;
+    current.status = "error";
+    current.error = error?.message || String(error);
+    current.updatedAt = new Date().toISOString();
+    changed = true;
+    return current;
+  });
+
+  if (changed) await chrome.alarms.clear(ALARM_NAME);
+}
+
+async function isRunActive(jobId, runToken) {
+  const job = await getJob();
+  return matchesActiveRun(job, jobId, runToken);
+}
+
+async function ensureRunningJobIdentity() {
+  return mutateJob((current) => {
+    if (!current || current.status !== "running") return current;
+    current.jobId = current.jobId || makeToken();
+    current.runToken = current.runToken || makeToken();
+    return current;
+  });
+}
+
+async function getJobRaw() {
   return (await chrome.storage.local.get(JOB_KEY))[JOB_KEY] || null;
 }
 
-async function saveJob(job) {
-  await chrome.storage.local.set({ [JOB_KEY]: job });
+async function getJob() {
+  await mutationQueue.catch(() => {});
+  return getJobRaw();
+}
+
+async function replaceJob(job) {
+  return mutateJob(() => job);
+}
+
+function mutateJob(mutator) {
+  const task = mutationQueue.then(async () => {
+    const current = await getJobRaw();
+    const next = await mutator(current);
+    if (next === undefined) return current;
+    await chrome.storage.local.set({ [JOB_KEY]: next });
+    return next;
+  });
+
+  mutationQueue = task.catch(() => {});
+  return task;
 }
