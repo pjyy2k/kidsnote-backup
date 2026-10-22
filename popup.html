@@ -1,5 +1,60 @@
 <!doctype html>
 <html lang="ko">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>KidsNote Backup</title></head>
-<body><main><h1>KidsNote Backup</h1><p>확장 프로그램 준비 중</p></main></body>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>KidsNote Backup</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <main class="app">
+    <header>
+      <h1>KidsNote Backup</h1>
+      <p>알림장과 원본 사진을 날짜별로 백업합니다.</p>
+    </header>
+
+    <section class="panel">
+      <label for="childId">Child ID</label>
+      <div class="inline">
+        <input id="childId" inputmode="numeric" autocomplete="off" placeholder="자동 감지 또는 직접 입력">
+        <button id="detectBtn" type="button" class="secondary">자동 감지</button>
+      </div>
+      <p class="hint">KidsNote 알림장 목록을 열어둔 상태에서 자동 감지를 누르세요.</p>
+
+      <div class="dates">
+        <label>시작일<input id="startDate" type="date"></label>
+        <label>종료일<input id="endDate" type="date"></label>
+      </div>
+
+      <fieldset>
+        <legend>백업 항목</legend>
+        <label class="check"><input id="photos" type="checkbox" checked> 원본 사진</label>
+        <label class="check"><input id="json" type="checkbox" checked> JSON</label>
+        <label class="check"><input id="markdown" type="checkbox" checked> Markdown</label>
+      </fieldset>
+
+      <button id="startBtn" type="button" class="primary">백업 시작</button>
+    </section>
+
+    <section class="panel status-panel" aria-live="polite">
+      <div class="status-row"><span>상태</span><strong id="status">대기</strong></div>
+      <div class="status-row"><span>현재 날짜</span><strong id="currentDate">-</strong></div>
+      <div class="stats">
+        <div><span>페이지</span><strong id="pages">0</strong></div>
+        <div><span>알림장</span><strong id="reports">0</strong></div>
+        <div><span>사진</span><strong id="images">0</strong></div>
+        <div><span>실패</span><strong id="failed">0</strong></div>
+      </div>
+      <p id="error" class="error" hidden></p>
+      <div class="actions">
+        <button id="pauseBtn" type="button" class="secondary">일시정지</button>
+        <button id="resumeBtn" type="button" class="secondary">이어받기</button>
+        <button id="cancelBtn" type="button" class="danger">취소</button>
+      </div>
+    </section>
+
+    <footer>저장 위치: Chrome 기본 다운로드 폴더 / KidsNote</footer>
+  </main>
+  <script src="popup.js"></script>
+</body>
 </html>
