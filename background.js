@@ -58,6 +58,7 @@ async function startJob(payload) {
     currentDate: null,
     processedReportIds: [],
     photoSequenceByDate: {},
+    dailyReportRows: [],
     counts: { pages: 0, reports: 0, images: 0, metadata: 0, failed: 0 },
     options: {
       photos: payload.options?.photos !== false,
@@ -98,6 +99,7 @@ async function resumeJob() {
 
     current.jobId = current.jobId || makeToken();
     current.runToken = makeToken();
+    current.dailyReportRows = current.dailyReportRows || [];
     current.status = "running";
     current.error = null;
     current.updatedAt = new Date().toISOString();
@@ -176,9 +178,17 @@ async function processNextPage() {
     if (!(await isRunActive(jobId, runToken))) return;
 
     if (reachedStart || !page.next) {
+      const beforeReport = await getJob();
+      if (!matchesActiveRun(beforeReport, jobId, runToken)) return;
+
+      const htmlSaved = await saveDailyHtmlReport(beforeReport);
+      if (!(await isRunActive(jobId, runToken))) return;
+
       await mutateJob((current) => {
         if (!matchesActiveRun(current, jobId, runToken)) return current;
         current.counts.pages += 1;
+        if (htmlSaved) current.counts.metadata += 1;
+        else current.counts.failed += 1;
         current.status = "completed";
         current.cursor = null;
         current.currentDate = null;
@@ -288,6 +298,18 @@ async function saveMetadataFile(filename, text, type) {
   }
 }
 
+async function saveDailyHtmlReport(job) {
+  try {
+    const rows = Array.isArray(job.dailyReportRows) ? job.dailyReportRows : [];
+    const child = sanitize(rows.find((row) => row.child_name)?.child_name || `child-${job.childId}`);
+    const html = makeDailyHtmlReport(rows, job);
+    return saveMetadataFile(`KidsNote/${child}/Reports/daily-report.html`, html, "text/html");
+  } catch (error) {
+    console.warn("HTML report generation failed", error);
+    return false;
+  }
+}
+
 async function setCurrentDate(jobId, runToken, date) {
   await mutateJob((current) => {
     if (!matchesActiveRun(current, jobId, runToken)) return current;
@@ -314,6 +336,8 @@ async function commitReportProgress(jobId, runToken, report, result) {
       current.counts.failed += result.countsDelta.failed;
       current.photoSequenceByDate = current.photoSequenceByDate || {};
       current.photoSequenceByDate[report.date_written] = result.sequence;
+      current.dailyReportRows = current.dailyReportRows || [];
+      current.dailyReportRows.push(makeDailyReportRow(report));
     }
 
     current.updatedAt = new Date().toISOString();
@@ -339,8 +363,23 @@ function makeMetadata(report) {
     author: report.author ?? null,
     content: report.content ?? "",
     weather: report.weather ?? null,
+    mood_status: report.mood_status ?? null,
+    health_status: report.health_status ?? null,
+    temperature_status: report.temperature_status ?? null,
+    bath_status: report.bath_status ?? null,
+    meal_status: report.meal_status ?? null,
+    sleep_hour: report.sleep_hour ?? null,
+    bowel_status: report.bowel_status ?? null,
+    nail_status: report.nail_status ?? null,
+    outdoor_activity_status: report.outdoor_activity_status ?? null,
+    food: report.food ?? [],
+    nursing: report.nursing ?? [],
+    sleep: report.sleep ?? [],
+    bowel: report.bowel ?? [],
+    temperature: report.temperature ?? null,
     num_comments: report.num_comments ?? null,
     reaction_count: report.reaction_count ?? null,
+    activity_rate: report.activity_rate ?? null,
     attached_video: report.attached_video ?? null,
     attached_files: report.attached_files ?? [],
     attached_images: (report.attached_images || []).map((image, index) => ({
@@ -354,6 +393,39 @@ function makeMetadata(report) {
       large: image.large ?? null,
       small: image.small ?? null
     }))
+  };
+}
+
+function makeDailyReportRow(report) {
+  return {
+    id: report.id ?? null,
+    date: report.date_written ?? null,
+    child_name: report.child_name ?? null,
+    class_name: report.class_name ?? null,
+    author_name: report.author_name ?? null,
+    weather: report.weather ?? null,
+    mood_status: report.mood_status ?? null,
+    health_status: report.health_status ?? null,
+    temperature_status: report.temperature_status ?? null,
+    temperature: report.temperature ?? null,
+    bath_status: report.bath_status ?? null,
+    meal_status: report.meal_status ?? null,
+    sleep_hour: report.sleep_hour ?? null,
+    bowel_status: report.bowel_status ?? null,
+    nail_status: report.nail_status ?? null,
+    outdoor_activity_status: report.outdoor_activity_status ?? null,
+    food: compactValue(report.food),
+    nursing: compactValue(report.nursing),
+    sleep: compactValue(report.sleep),
+    bowel: compactValue(report.bowel),
+    num_comments: report.num_comments ?? 0,
+    reaction_count: report.reaction_count ?? 0,
+    activity_rate: report.activity_rate ?? null,
+    has_video: Boolean(report.attached_video || report.material_video),
+    attached_file_count: Array.isArray(report.attached_files) ? report.attached_files.length : 0,
+    is_sent_from_center: report.is_sent_from_center ?? null,
+    read_by_me: report.read_by_me ?? null,
+    read_date: report.read_by_parent?.date_read ?? null
   };
 }
 
@@ -380,6 +452,228 @@ function makeMarkdown(meta) {
   }
 
   return `${lines.join("\n")}\n`;
+}
+
+function makeDailyHtmlReport(inputRows, job) {
+  const rows = [...inputRows].sort((a, b) => String(b.date || "").localeCompare(String(a.date || "")));
+  const childName = rows.find((row) => row.child_name)?.child_name || "KidsNote";
+  const months = summarizeMonths(rows);
+  const generatedAt = new Date().toLocaleString("ko-KR");
+  const uniqueDates = new Set(rows.map((row) => row.date).filter(Boolean)).size;
+  const classNames = [...new Set(rows.map((row) => row.class_name).filter(Boolean))].join(", ") || "-";
+
+  const monthRows = months.map((m) => `
+    <tr>
+      <td>${escapeHtml(m.month)}</td>
+      <td>${m.days}</td>
+      <td>${escapeHtml(displayValue("weather", m.weather))}</td>
+      <td>${escapeHtml(displayValue("mood_status", m.mood))}</td>
+      <td>${escapeHtml(displayValue("health_status", m.health))}</td>
+      <td>${escapeHtml(displayValue("meal_status", m.meal))}</td>
+      <td>${escapeHtml(displayValue("sleep_hour", m.sleep))}</td>
+      <td>${escapeHtml(displayValue("bowel_status", m.bowel))}</td>
+    </tr>`).join("");
+
+  const dailyRows = rows.map((row) => `
+    <tr data-month="${escapeHtml(String(row.date || "").slice(0, 7))}">
+      <td class="date">${escapeHtml(row.date || "-")}</td>
+      <td>${escapeHtml(displayValue("weather", row.weather))}</td>
+      <td>${escapeHtml(displayValue("mood_status", row.mood_status))}</td>
+      <td>${escapeHtml(displayValue("health_status", row.health_status))}</td>
+      <td>${escapeHtml(displayValue("temperature_status", row.temperature_status))}</td>
+      <td>${escapeHtml(formatTemperature(row.temperature))}</td>
+      <td>${escapeHtml(displayValue("meal_status", row.meal_status))}</td>
+      <td>${escapeHtml(displayValue("sleep_hour", row.sleep_hour))}</td>
+      <td>${escapeHtml(displayValue("bowel_status", row.bowel_status))}</td>
+      <td>${escapeHtml(displayValue("bath_status", row.bath_status))}</td>
+      <td>${escapeHtml(displayValue("nail_status", row.nail_status))}</td>
+      <td>${escapeHtml(displayValue("outdoor_activity_status", row.outdoor_activity_status))}</td>
+      <td>${escapeHtml(row.food || "-")}</td>
+      <td>${escapeHtml(row.nursing || "-")}</td>
+      <td>${escapeHtml(row.sleep || "-")}</td>
+      <td>${escapeHtml(row.bowel || "-")}</td>
+      <td>${Number(row.num_comments || 0)}</td>
+      <td>${Number(row.reaction_count || 0)}</td>
+      <td>${escapeHtml(formatActivityRate(row.activity_rate))}</td>
+      <td>${row.has_video ? "있음" : "-"}</td>
+      <td>${Number(row.attached_file_count || 0)}</td>
+      <td>${escapeHtml(row.class_name || "-")}</td>
+      <td>${escapeHtml(row.author_name || "-")}</td>
+    </tr>`).join("");
+
+  const monthOptions = months.map((m) => `<option value="${escapeHtml(m.month)}">${escapeHtml(m.month)}</option>`).join("");
+
+  return `<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>${escapeHtml(childName)} - KidsNote 일별 데이터 리포트</title>
+<style>
+:root{font-family:Inter,Pretendard,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#17202a;background:#f6f7f9}*{box-sizing:border-box}body{margin:0;padding:28px}main{max-width:1600px;margin:auto}.hero{display:flex;justify-content:space-between;gap:20px;align-items:flex-end;margin-bottom:18px}.hero h1{font-size:28px;margin:0 0 6px}.muted{color:#667085;font-size:13px}.cards{display:grid;grid-template-columns:repeat(4,minmax(150px,1fr));gap:12px;margin:18px 0}.card{background:white;border:1px solid #e4e7ec;border-radius:14px;padding:16px}.card span{display:block;color:#667085;font-size:12px}.card strong{display:block;font-size:22px;margin-top:5px}.panel{background:white;border:1px solid #e4e7ec;border-radius:14px;padding:18px;margin-top:14px}.panel h2{font-size:18px;margin:0 0 12px}.controls{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-bottom:12px}.controls input,.controls select{padding:9px 10px;border:1px solid #d0d5dd;border-radius:8px;background:white;font:inherit}.table-wrap{overflow:auto;border:1px solid #eaecf0;border-radius:10px}table{border-collapse:collapse;width:100%;min-width:900px;font-size:12px}th,td{padding:9px 10px;border-bottom:1px solid #eaecf0;text-align:left;white-space:nowrap}th{position:sticky;top:0;background:#f9fafb;color:#475467;z-index:1}tbody tr:hover{background:#fcfcfd}.date{font-weight:700}.empty{padding:28px;text-align:center;color:#667085}.foot{margin-top:16px;color:#98a2b3;font-size:11px}@media(max-width:760px){body{padding:14px}.hero{display:block}.cards{grid-template-columns:repeat(2,1fr)}}@media print{body{padding:0;background:white}.controls{display:none}.panel,.card{break-inside:avoid}th{position:static}}
+</style>
+</head>
+<body>
+<main>
+  <div class="hero">
+    <div><h1>${escapeHtml(childName)} · 일별 데이터 리포트</h1><div class="muted">사진과 알림장 본문은 제외하고 생활기록 및 상태 데이터만 정리했습니다.</div></div>
+    <div class="muted">생성: ${escapeHtml(generatedAt)}</div>
+  </div>
+  <section class="cards">
+    <div class="card"><span>기록 일수</span><strong>${uniqueDates}</strong></div>
+    <div class="card"><span>백업 기간</span><strong style="font-size:15px">${escapeHtml(job.startDate)} ~ ${escapeHtml(job.endDate)}</strong></div>
+    <div class="card"><span>알림장 건수</span><strong>${rows.length}</strong></div>
+    <div class="card"><span>반</span><strong style="font-size:15px">${escapeHtml(classNames)}</strong></div>
+  </section>
+
+  <section class="panel">
+    <h2>월별 요약</h2>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>월</th><th>기록일</th><th>주요 날씨</th><th>주요 기분</th><th>주요 건강</th><th>주요 식사</th><th>주요 수면</th><th>주요 배변</th></tr></thead>
+        <tbody>${monthRows || '<tr><td colspan="8" class="empty">데이터 없음</td></tr>'}</tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="panel">
+    <h2>일별 기록</h2>
+    <div class="controls">
+      <label>월 <select id="monthFilter"><option value="">전체</option>${monthOptions}</select></label>
+      <label>검색 <input id="search" type="search" placeholder="날씨, 상태, 반, 작성자…"></label>
+      <span id="visibleCount" class="muted"></span>
+    </div>
+    <div class="table-wrap">
+      <table id="dailyTable">
+        <thead><tr><th>날짜</th><th>날씨</th><th>기분</th><th>건강</th><th>체온상태</th><th>체온</th><th>식사</th><th>수면시간</th><th>배변</th><th>목욕</th><th>손발톱</th><th>야외활동</th><th>식사상세</th><th>간호</th><th>수면상세</th><th>배변상세</th><th>댓글</th><th>반응</th><th>활동률</th><th>영상</th><th>첨부파일</th><th>반</th><th>작성자</th></tr></thead>
+        <tbody>${dailyRows || '<tr><td colspan="23" class="empty">데이터 없음</td></tr>'}</tbody>
+      </table>
+    </div>
+  </section>
+  <div class="foot">KidsNote Backup · 사진 URL 및 알림장 본문은 이 리포트에 포함하지 않습니다.</div>
+</main>
+<script>
+(() => {
+  const month = document.getElementById('monthFilter');
+  const search = document.getElementById('search');
+  const count = document.getElementById('visibleCount');
+  const rows = [...document.querySelectorAll('#dailyTable tbody tr[data-month]')];
+  function apply(){
+    const m = month.value;
+    const q = search.value.trim().toLowerCase();
+    let visible = 0;
+    for(const row of rows){
+      const okMonth = !m || row.dataset.month === m;
+      const okSearch = !q || row.textContent.toLowerCase().includes(q);
+      const show = okMonth && okSearch;
+      row.hidden = !show;
+      if(show) visible += 1;
+    }
+    count.textContent = visible + '건 표시';
+  }
+  month.addEventListener('change', apply);
+  search.addEventListener('input', apply);
+  apply();
+})();
+</script>
+</body>
+</html>`;
+}
+
+function summarizeMonths(rows) {
+  const groups = new Map();
+  for (const row of rows) {
+    const month = String(row.date || "").slice(0, 7);
+    if (!/^\d{4}-\d{2}$/.test(month)) continue;
+    if (!groups.has(month)) groups.set(month, []);
+    groups.get(month).push(row);
+  }
+
+  return [...groups.entries()]
+    .sort((a, b) => b[0].localeCompare(a[0]))
+    .map(([month, items]) => ({
+      month,
+      days: new Set(items.map((row) => row.date).filter(Boolean)).size,
+      weather: mode(items.map((row) => row.weather)),
+      mood: mode(items.map((row) => row.mood_status)),
+      health: mode(items.map((row) => row.health_status)),
+      meal: mode(items.map((row) => row.meal_status)),
+      sleep: mode(items.map((row) => row.sleep_hour)),
+      bowel: mode(items.map((row) => row.bowel_status))
+    }));
+}
+
+function mode(values) {
+  const counts = new Map();
+  for (const value of values) {
+    if (value === null || value === undefined || value === "") continue;
+    const key = String(value);
+    counts.set(key, (counts.get(key) || 0) + 1);
+  }
+  let best = null;
+  let bestCount = 0;
+  for (const [key, count] of counts) {
+    if (count > bestCount) {
+      best = key;
+      bestCount = count;
+    }
+  }
+  return best;
+}
+
+function displayValue(field, value) {
+  if (value === null || value === undefined || value === "") return "-";
+  const key = String(value);
+  const maps = {
+    weather: { sunny: "맑음", mostly_cloudy: "구름 많음", cloudy: "흐림", overcast: "흐림", rain: "비", rainy: "비", snow: "눈" },
+    mood_status: { good: "좋음", normal: "보통", bad: "나쁨" },
+    health_status: { good: "좋음", normal: "보통", bad: "나쁨" },
+    temperature_status: { normal: "정상", high: "높음", low: "낮음" },
+    meal_status: { fixed: "정량", more: "많이", less: "적게", none: "안 먹음" },
+    sleep_hour: { none: "안 잠", below_1: "1시간 미만", between_1_2: "1~2시간", above_2: "2시간 이상" },
+    bowel_status: { none: "안 함", normal: "보통", hard: "딱딱함", loose: "묽음" },
+    bath_status: { done: "함", none: "안 함" },
+    nail_status: { good: "양호", need: "정리 필요" },
+    outdoor_activity_status: { done: "함", none: "안 함" }
+  };
+  return maps[field]?.[key] || key;
+}
+
+function formatTemperature(value) {
+  if (value === null || value === undefined || value === "") return "-";
+  if (typeof value === "number") return `${value}℃`;
+  if (typeof value === "object") return compactValue(value) || "-";
+  return String(value);
+}
+
+function formatActivityRate(value) {
+  if (value === null || value === undefined || value === "") return "-";
+  const n = Number(value);
+  if (Number.isFinite(n)) return n <= 1 ? `${Math.round(n * 100)}%` : `${n}%`;
+  return String(value);
+}
+
+function compactValue(value) {
+  if (value === null || value === undefined || value === "") return "";
+  if (Array.isArray(value)) {
+    return value.map(compactValue).filter(Boolean).join(" / ");
+  }
+  if (typeof value === "object") {
+    return Object.entries(value)
+      .filter(([, v]) => v !== null && v !== undefined && v !== "")
+      .map(([k, v]) => `${k}: ${compactValue(v)}`)
+      .join(", ");
+  }
+  return String(value);
+}
+
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
 }
 
 function validatePayload(payload) {
@@ -456,6 +750,7 @@ async function ensureRunningJobIdentity() {
     if (!current || current.status !== "running") return current;
     current.jobId = current.jobId || makeToken();
     current.runToken = current.runToken || makeToken();
+    current.dailyReportRows = current.dailyReportRows || [];
     return current;
   });
 }
