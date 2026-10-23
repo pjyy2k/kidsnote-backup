@@ -5,14 +5,14 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>KidsNote Backup</title>
   <style>
-    body{font-family:sans-serif;min-width:380px;margin:0;background:#f6f7f9;color:#222}.app{padding:16px}.panel{padding:12px;border:1px solid #ddd;border-radius:10px;margin-bottom:12px;background:#fff}h1{margin:0 0 4px}.step-title{display:flex;align-items:center;gap:8px;margin:0 0 8px;font-size:14px}.step-badge{display:inline-flex;width:24px;height:24px;border-radius:50%;align-items:center;justify-content:center;background:#2563eb;color:#fff;font-size:12px;font-weight:700}.inline,.actions{display:flex;gap:8px}.inline input{flex:1}.dates,.stats{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:12px}.stats{grid-template-columns:repeat(4,1fr)}label{font-size:13px;font-weight:600}input{box-sizing:border-box;width:100%;padding:8px;border:1px solid #ccc;border-radius:7px}fieldset{border:0;padding:0;margin:14px 0}legend{font-size:13px;font-weight:700;margin-bottom:7px}.check,.radio{font-weight:400;margin-right:10px;display:inline-flex;align-items:center;gap:5px}.check input,.radio input{width:auto}button{padding:8px 10px;border:0;border-radius:7px;cursor:pointer}.primary{width:100%;background:#2563eb;color:#fff;font-weight:700}.secondary{background:#eef2f6}.danger{background:#fee4e2;color:#b42318}.status-row{display:flex;justify-content:space-between;padding:3px 0;font-size:13px}.stats div{text-align:center;background:#f8fafc;padding:8px;border-radius:7px}.stats span,.hint,header p,footer{color:#667085;font-size:11px}.stats strong{display:block;font-size:16px}.actions button{flex:1}.error{background:#fff1f0;color:#b42318;padding:8px;border-radius:7px;font-size:12px}.folder-example{margin:7px 0 0;padding:8px;background:#f8fafc;border-radius:7px;font-family:monospace;font-size:11px;line-height:1.5;color:#475467}.wait-notice{margin:10px 0 0;padding:9px 10px;border-radius:8px;background:#fffaeb;color:#7a5d00;font-size:11px;line-height:1.5}.update-notice{padding:11px 12px;border:1px solid #f7c948;border-radius:10px;margin-bottom:12px;background:#fff8db}.update-notice strong{display:block;font-size:13px;color:#694d00}.update-notice p{margin:4px 0 9px;font-size:11px;line-height:1.45;color:#7a5d00}.update-notice button{width:100%;background:#f4b400;color:#332500;font-weight:700}.version{margin-top:4px;color:#98a2b3;font-size:10px}footer{text-align:center}
+    body{font-family:sans-serif;min-width:390px;margin:0;background:#f6f7f9;color:#222}.app{padding:16px}.panel{padding:12px;border:1px solid #ddd;border-radius:10px;margin-bottom:12px;background:#fff}h1{margin:0 0 4px}.step-title{display:flex;align-items:center;gap:8px;margin:0 0 8px;font-size:14px}.step-badge{display:inline-flex;width:24px;height:24px;border-radius:50%;align-items:center;justify-content:center;background:#2563eb;color:#fff;font-size:12px;font-weight:700}.inline,.actions,.backup-actions{display:flex;gap:8px}.inline input{flex:1}.dates,.stats{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:12px}.stats{grid-template-columns:repeat(4,1fr)}label{font-size:13px;font-weight:600}input{box-sizing:border-box;width:100%;padding:8px;border:1px solid #ccc;border-radius:7px}fieldset{border:0;padding:0;margin:14px 0}legend{font-size:13px;font-weight:700;margin-bottom:7px}.check,.radio{font-weight:400;margin-right:10px;display:inline-flex;align-items:center;gap:5px}.check input,.radio input{width:auto}button{padding:8px 10px;border:0;border-radius:7px;cursor:pointer}.primary{background:#2563eb;color:#fff;font-weight:700}.album-primary{background:#0f766e;color:#fff;font-weight:700}.full{width:100%}.secondary{background:#eef2f6}.danger{background:#fee4e2;color:#b42318}.status-row{display:flex;justify-content:space-between;padding:3px 0;font-size:13px}.stats div{text-align:center;background:#f8fafc;padding:8px;border-radius:7px}.stats span,.hint,header p,footer{color:#667085;font-size:11px}.stats strong{display:block;font-size:16px}.actions button,.backup-actions button{flex:1}.error{background:#fff1f0;color:#b42318;padding:8px;border-radius:7px;font-size:12px}.folder-example{margin:7px 0 0;padding:8px;background:#f8fafc;border-radius:7px;font-family:monospace;font-size:11px;line-height:1.5;color:#475467;white-space:pre-line}.wait-notice{margin:10px 0 0;padding:9px 10px;border-radius:8px;background:#fffaeb;color:#7a5d00;font-size:11px;line-height:1.5}.album-note{margin:8px 0 0;padding:9px 10px;border-radius:8px;background:#ecfdf3;color:#166534;font-size:11px;line-height:1.5}.update-notice{padding:11px 12px;border:1px solid #f7c948;border-radius:10px;margin-bottom:12px;background:#fff8db}.update-notice strong{display:block;font-size:13px;color:#694d00}.update-notice p{margin:4px 0 9px;font-size:11px;line-height:1.45;color:#7a5d00}.update-notice button{width:100%;background:#f4b400;color:#332500;font-weight:700}.version{margin-top:4px;color:#98a2b3;font-size:10px}footer{text-align:center}
   </style>
 </head>
 <body>
   <main class="app">
     <header>
       <h1>KidsNote Backup</h1>
-      <p>알림장과 원본 사진을 지정 기간으로 백업합니다.</p>
+      <p>알림장과 앨범의 원본 사진을 지정 기간으로 백업합니다.</p>
       <div id="versionText" class="version"></div>
     </header>
 
@@ -23,9 +23,9 @@
     </section>
 
     <section class="panel">
-      <h2 class="step-title"><span class="step-badge">1</span>KidsNote 알림장 열기</h2>
-      <p class="hint">먼저 KidsNote 알림장 화면을 연 뒤 로그인 상태를 확인하세요.</p>
-      <button id="openReportBtn" type="button" class="primary">KidsNote 알림장 열기</button>
+      <h2 class="step-title"><span class="step-badge">1</span>KidsNote 열기</h2>
+      <p class="hint">KidsNote 로그인 상태에서 알림장 화면을 한 번 열어두면 자녀/원/반 정보를 자동으로 찾기 쉽습니다.</p>
+      <button id="openReportBtn" type="button" class="primary full">KidsNote 알림장 열기</button>
     </section>
 
     <section class="panel">
@@ -35,7 +35,7 @@
         <input id="childId" inputmode="numeric" autocomplete="off" placeholder="자동 감지 또는 직접 입력">
         <button id="detectBtn" type="button" class="secondary">자동 감지</button>
       </div>
-      <p class="hint">KidsNote 알림장 목록을 열어둔 상태에서 자동 감지를 누르세요.</p>
+      <p class="hint">앨범 백업에 필요한 Center/Class ID는 자동으로 찾아 사용합니다.</p>
     </section>
 
     <section class="panel">
@@ -46,7 +46,7 @@
       </div>
 
       <fieldset>
-        <legend>백업 항목</legend>
+        <legend>알림장 백업 항목</legend>
         <label class="check"><input id="photos" type="checkbox" checked> 원본 사진</label>
         <label class="check"><input id="json" type="checkbox" checked> JSON</label>
         <label class="check"><input id="markdown" type="checkbox" checked> 일기(Markdown)</label>
@@ -59,16 +59,21 @@
         <div id="folderExample" class="folder-example"></div>
       </fieldset>
 
-      <button id="startBtn" type="button" class="primary">백업 시작</button>
-      <p class="wait-notice">오래전 알림장과 사진을 백업하는 경우 해당 날짜까지 탐색하는 데 시간이 다소 걸릴 수 있습니다. 진행이 멈춘 것처럼 보여도 잠시 기다려 주세요.</p>
+      <div class="backup-actions">
+        <button id="startReportBtn" type="button" class="primary">알림장 다운로드</button>
+        <button id="startAlbumBtn" type="button" class="album-primary">앨범 다운로드</button>
+      </div>
+      <p class="album-note">앨범 다운로드는 앨범 게시물의 <b>원본 사진</b>을 일괄 저장합니다. 알림장 사진과 섞이지 않도록 Album 폴더에 별도로 저장됩니다.</p>
+      <p class="wait-notice">오래전 알림장/앨범 사진을 백업하는 경우 해당 날짜까지 탐색하는 데 시간이 다소 걸릴 수 있습니다. 진행이 멈춘 것처럼 보여도 잠시 기다려 주세요.</p>
     </section>
 
     <section class="panel" aria-live="polite">
+      <div class="status-row"><span>작업</span><strong id="jobType">-</strong></div>
       <div class="status-row"><span>상태</span><strong id="status">대기</strong></div>
       <div class="status-row"><span>현재 날짜</span><strong id="currentDate">-</strong></div>
       <div class="stats">
         <div><span>페이지</span><strong id="pages">0</strong></div>
-        <div><span>알림장</span><strong id="reports">0</strong></div>
+        <div><span id="itemsLabel">항목</span><strong id="items">0</strong></div>
         <div><span>사진</span><strong id="images">0</strong></div>
         <div><span>실패</span><strong id="failed">0</strong></div>
       </div>
