@@ -1,14 +1,13 @@
 {
   "manifest_version": 3,
   "name": "__MSG_extensionName__",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "default_locale": "ko",
   "description": "__MSG_extensionDescription__",
   "permissions": ["storage", "downloads", "alarms"],
   "host_permissions": [
     "https://*.kidsnote.com/*",
-    "https://up-kids-kage.kakao.com/*",
-    "https://raw.githubusercontent.com/*"
+    "https://up-kids-kage.kakao.com/*"
   ],
   "background": {"service_worker": "background.js"},
   "content_scripts": [
