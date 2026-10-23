@@ -16,13 +16,16 @@ async function init() {
   showInstalledVersion();
   checkLatestVersion().catch((error) => console.debug("Version check failed", error));
   await refreshState();
-  if (activeTab?.url?.startsWith("https://www.kidsnote.com/")) await detectChild();
+  if (activeTab?.url?.startsWith("https://www.kidsnote.com/")) {
+    detectChild({ quiet: true }).catch(() => {});
+  }
 }
 
 function bindEvents() {
   el("openReportBtn").addEventListener("click", () => openKidsNoteReport().catch(showError));
   el("detectBtn").addEventListener("click", () => detectChild().catch(showError));
-  el("startBtn").addEventListener("click", () => startBackup().catch(showError));
+  el("startReportBtn").addEventListener("click", () => startBackup("report").catch(showError));
+  el("startAlbumBtn").addEventListener("click", () => startBackup("album").catch(showError));
   el("pauseBtn").addEventListener("click", () => send("PAUSE").then(refreshState).catch(showError));
   el("resumeBtn").addEventListener("click", () => send("RESUME").then(refreshState).catch(showError));
   el("cancelBtn").addEventListener("click", () => send("CANCEL").then(refreshState).catch(showError));
@@ -114,34 +117,58 @@ async function ensureMemoryMode() {
   return response;
 }
 
-async function detectChild() {
+async function detectChild({ quiet = false } = {}) {
   ensureKidsNoteTab();
-  clearError();
-  await ensureMemoryMode();
+  if (!quiet) clearError();
 
-  const response = await send("DETECT_CHILD", { tabId: activeTab.id });
-  if (!response.ok) throw new Error(response.error || "Child ID 자동 감지 실패");
-  if (!response.childId) throw new Error("Child ID를 찾지 못했습니다. 알림장 목록을 연 뒤 다시 시도하거나 직접 입력하세요.");
+  let response = await send("DETECT_CONTEXT", { tabId: activeTab.id });
+  if (response?.ok && response.childId) {
+    el("childId").value = response.childId;
+    return response;
+  }
+
+  try {
+    await ensureMemoryMode();
+    response = await send("DETECT_CONTEXT", { tabId: activeTab.id });
+  } catch (error) {
+    if (!quiet) throw error;
+  }
+
+  if (!response?.ok || !response.childId) {
+    if (quiet) return null;
+    throw new Error("Child ID를 찾지 못했습니다. 알림장 목록을 연 뒤 다시 시도하거나 직접 입력하세요.");
+  }
+
   el("childId").value = response.childId;
+  return response;
 }
 
-async function startBackup() {
+async function startBackup(type) {
   ensureKidsNoteTab();
   clearError();
-  await ensureMemoryMode();
+
+  if (!el("childId").value.trim()) {
+    await detectChild();
+  }
+
+  if (type === "report") {
+    await ensureMemoryMode();
+  }
 
   const payload = {
+    type,
     tabId: activeTab.id,
     childId: el("childId").value.trim(),
     startDate: el("startDate").value,
     endDate: el("endDate").value,
     options: {
-      photos: el("photos").checked,
-      json: el("json").checked,
-      markdown: el("markdown").checked,
+      photos: type === "album" ? true : el("photos").checked,
+      json: type === "report" ? el("json").checked : false,
+      markdown: type === "report" ? el("markdown").checked : false,
       photoFolderMode: selectedPhotoFolderMode()
     }
   };
+
   const response = await send("START", { payload });
   if (!response.ok) throw new Error(response.error || "백업 시작 실패");
   render(response.job);
@@ -153,9 +180,9 @@ function selectedPhotoFolderMode() {
 
 function updateFolderExample() {
   if (selectedPhotoFolderMode() === "flat") {
-    el("folderExample").textContent = "Photos/2026-10-21-001.jpg\nPhotos/2026-10-21-002.jpg";
+    el("folderExample").textContent = "알림장: Photos/2026-10-21-001.jpg\n앨범: Album/Photos/2026-10-21-001.jpg";
   } else {
-    el("folderExample").textContent = "Photos/2026-10-21/2026-10-21-001.jpg\nPhotos/2026-10-21/2026-10-21-002.jpg";
+    el("folderExample").textContent = "알림장: Photos/2026-10-21/2026-10-21-001.jpg\n앨범: Album/Photos/2026-10-21/2026-10-21-001.jpg";
   }
 }
 
@@ -170,23 +197,29 @@ async function refreshState() {
 
 function render(job) {
   const counts = job?.counts || {};
+  const type = job?.type || null;
+  el("jobType").textContent = type === "album" ? "앨범" : type === "report" ? "알림장" : "-";
   el("status").textContent = job ? (statusNames[job.status] || job.status) : "대기";
   el("currentDate").textContent = job?.currentDate || "-";
   el("pages").textContent = counts.pages || 0;
-  el("reports").textContent = counts.reports || 0;
+  el("itemsLabel").textContent = type === "album" ? "앨범" : "알림장";
+  el("items").textContent = type === "album" ? (counts.albums || 0) : (counts.reports || 0);
   el("images").textContent = counts.images || 0;
   el("failed").textContent = counts.failed || 0;
 
   if (job?.error) showError(job.error); else clearError();
 
-  el("pauseBtn").disabled = job?.status !== "running";
+  const running = job?.status === "running";
+  el("startReportBtn").disabled = running;
+  el("startAlbumBtn").disabled = running;
+  el("pauseBtn").disabled = !running;
   el("resumeBtn").disabled = !job || !["paused", "error"].includes(job.status);
   el("cancelBtn").disabled = !job || ["completed", "cancelled"].includes(job.status);
 }
 
 function ensureKidsNoteTab() {
   if (!activeTab?.id || !activeTab.url?.startsWith("https://www.kidsnote.com/")) {
-    throw new Error("1단계에서 KidsNote 알림장 화면을 먼저 열어주세요.");
+    throw new Error("1단계에서 KidsNote 화면을 먼저 열어주세요.");
   }
 }
 
