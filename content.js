@@ -95,7 +95,7 @@ function detectChildId() {
 async function fetchReportsPage(childId, page) {
   const url = new URL(`https://kapi.kidsnote.com/v1_2/children/${encodeURIComponent(childId)}/reports/`);
   if (page) url.searchParams.set("page", page);
-  url.searchParams.set("page_size", "12");
+  url.searchParams.set("page_size", "99999");
   url.searchParams.set("tz", "Asia/Seoul");
   url.searchParams.set("child", String(childId));
 
