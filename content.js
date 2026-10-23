@@ -141,26 +141,26 @@ async function resolveAlbumContext(childId) {
     throw new Error("앨범 조회에 사용할 Child ID를 찾지 못했습니다.");
   }
 
-  if (context.centerId && context.classId) {
-    return {
-      childId: resolvedChildId,
-      centerId: String(context.centerId),
-      classId: String(context.classId),
-      childName: null
-    };
+  let sample = null;
+  try {
+    const reports = await fetchReportsPage(resolvedChildId, null, 1);
+    sample = reports.results?.[0] || null;
+  } catch (_) {
+    sample = null;
   }
 
-  const reports = await fetchReportsPage(resolvedChildId, null, 1);
-  const sample = reports.results?.[0];
-  if (!sample?.center || !sample?.cls) {
+  const centerId = context.centerId || sample?.center || null;
+  const classId = context.classId || sample?.cls || null;
+
+  if (!centerId || !classId) {
     throw new Error("앨범 조회에 필요한 원/반 정보를 자동으로 찾지 못했습니다. KidsNote 알림장 또는 앨범 화면을 한 번 연 뒤 다시 시도하세요.");
   }
 
   return {
     childId: resolvedChildId,
-    centerId: String(sample.center),
-    classId: String(sample.cls),
-    childName: sample.child_name || null
+    centerId: String(centerId),
+    classId: String(classId),
+    childName: sample?.child_name || null
   };
 }
 
