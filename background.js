@@ -22,7 +22,8 @@ async function handleMessage(message) {
     case "GET_STATE":
       return { ok: true, job: await getJob() };
     case "DETECT_CHILD":
-      return detectChild(message.tabId);
+    case "DETECT_CONTEXT":
+      return detectContext(message.tabId);
     case "START":
       return startJob(message.payload);
     case "PAUSE":
@@ -36,34 +37,58 @@ async function handleMessage(message) {
   }
 }
 
-async function detectChild(tabId) {
-  const response = await chrome.tabs.sendMessage(tabId, { type: "KIDSNOTE_DETECT_CHILD" });
-  return { ok: true, childId: response?.childId || null };
+async function detectContext(tabId) {
+  const response = await chrome.tabs.sendMessage(tabId, { type: "KIDSNOTE_DETECT_CONTEXT" });
+  if (!response?.ok) throw new Error(response?.error || "KidsNote 정보를 자동 감지하지 못했습니다.");
+  return {
+    ok: true,
+    childId: response.childId || null,
+    centerId: response.centerId || null,
+    classId: response.classId || null
+  };
 }
 
 async function startJob(payload) {
   validatePayload(payload);
   await chrome.alarms.clear(ALARM_NAME);
 
+  const type = payload.type === "album" ? "album" : "report";
+  let albumContext = null;
+
+  if (type === "album") {
+    const response = await chrome.tabs.sendMessage(payload.tabId, {
+      type: "KIDSNOTE_RESOLVE_ALBUM_CONTEXT",
+      childId: String(payload.childId)
+    });
+    if (!response?.ok) {
+      throw new Error(response?.error || "앨범 조회에 필요한 원/반 정보를 찾지 못했습니다.");
+    }
+    albumContext = response;
+  }
+
   const now = new Date().toISOString();
   const job = {
     jobId: makeToken(),
     runToken: makeToken(),
+    type,
     status: "running",
     tabId: payload.tabId,
     childId: String(payload.childId),
+    childName: albumContext?.childName || null,
+    centerId: albumContext?.centerId || null,
+    classId: albumContext?.classId || null,
     startDate: payload.startDate,
     endDate: payload.endDate,
     cursor: null,
     currentDate: null,
-    processedReportIds: [],
+    processedItemIds: [],
     photoSequenceByDate: {},
     dailyReportRows: [],
-    counts: { pages: 0, reports: 0, images: 0, metadata: 0, failed: 0 },
+    counts: { pages: 0, reports: 0, albums: 0, images: 0, metadata: 0, failed: 0 },
     options: {
-      photos: payload.options?.photos !== false,
-      json: payload.options?.json !== false,
-      markdown: payload.options?.markdown !== false,
+      photos: type === "album" ? true : payload.options?.photos !== false,
+      json: type === "report" && payload.options?.json !== false,
+      markdown: type === "report" && payload.options?.markdown !== false,
       photoFolderMode: payload.options?.photoFolderMode === "flat" ? "flat" : "date"
     },
     startedAt: now,
@@ -99,7 +124,11 @@ async function resumeJob() {
 
     current.jobId = current.jobId || makeToken();
     current.runToken = makeToken();
+    current.type = current.type === "album" ? "album" : "report";
+    current.processedItemIds = current.processedItemIds || current.processedReportIds || [];
+    current.photoSequenceByDate = current.photoSequenceByDate || {};
     current.dailyReportRows = current.dailyReportRows || [];
+    current.counts = normalizeCounts(current.counts);
     current.status = "running";
     current.error = null;
     current.updatedAt = new Date().toISOString();
@@ -140,11 +169,19 @@ async function processNextPage() {
     jobId = snapshot.jobId;
     runToken = snapshot.runToken;
 
-    const response = await chrome.tabs.sendMessage(snapshot.tabId, {
-      type: "KIDSNOTE_FETCH_PAGE",
-      childId: snapshot.childId,
-      page: snapshot.cursor
-    });
+    const response = snapshot.type === "album"
+      ? await chrome.tabs.sendMessage(snapshot.tabId, {
+          type: "KIDSNOTE_FETCH_ALBUM_PAGE",
+          childId: snapshot.childId,
+          centerId: snapshot.centerId,
+          classId: snapshot.classId,
+          page: snapshot.cursor
+        })
+      : await chrome.tabs.sendMessage(snapshot.tabId, {
+          type: "KIDSNOTE_FETCH_PAGE",
+          childId: snapshot.childId,
+          page: snapshot.cursor
+        });
 
     if (!(await isRunActive(jobId, runToken))) return;
     if (!response?.ok) throw new Error(response?.error || "목록 API 호출에 실패했습니다.");
@@ -152,55 +189,66 @@ async function processNextPage() {
     const page = response.data || {};
     let reachedStart = false;
 
-    for (const report of page.results || []) {
+    for (const item of page.results || []) {
       if (!(await isRunActive(jobId, runToken))) return;
 
       const current = await getJob();
-      if (!current || current.jobId !== jobId || current.runToken !== runToken || current.status !== "running") return;
+      if (!matchesActiveRun(current, jobId, runToken)) return;
 
-      const date = String(report.date_written || "");
+      const date = current.type === "album" ? albumDate(item) : String(item.date_written || "");
       if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) continue;
       if (date > current.endDate) continue;
       if (date < current.startDate) {
         reachedStart = true;
         break;
       }
-      if ((current.processedReportIds || []).includes(String(report.id))) continue;
+
+      const itemId = String(item.id ?? "");
+      if (!itemId || (current.processedItemIds || []).includes(itemId)) continue;
 
       await setCurrentDate(jobId, runToken, date);
-      const result = await backupReport(report, current, jobId, runToken);
+      const result = current.type === "album"
+        ? await backupAlbum(item, date, current, jobId, runToken)
+        : await backupReport(item, current, jobId, runToken);
+
       if (!result.completed) return;
 
-      const committed = await commitReportProgress(jobId, runToken, report, result);
+      const committed = await commitItemProgress(jobId, runToken, item, date, result);
       if (!committed) return;
     }
 
     if (!(await isRunActive(jobId, runToken))) return;
 
     if (reachedStart || !page.next) {
-      const beforeReport = await getJob();
-      if (!matchesActiveRun(beforeReport, jobId, runToken)) return;
+      const beforeFinish = await getJob();
+      if (!matchesActiveRun(beforeFinish, jobId, runToken)) return;
 
-      const htmlSaved = await saveDailyHtmlReport(beforeReport);
-      if (!(await isRunActive(jobId, runToken))) return;
+      let reportSaved = null;
+      if (beforeFinish.type === "report") {
+        reportSaved = await saveDailyHtmlReport(beforeFinish);
+        if (!(await isRunActive(jobId, runToken))) return;
+      }
 
       await mutateJob((current) => {
         if (!matchesActiveRun(current, jobId, runToken)) return current;
+        current.counts = normalizeCounts(current.counts);
         current.counts.pages += 1;
-        if (htmlSaved) current.counts.metadata += 1;
-        else current.counts.failed += 1;
+        if (reportSaved === true) current.counts.metadata += 1;
+        if (reportSaved === false) current.counts.failed += 1;
         current.status = "completed";
         current.cursor = null;
         current.currentDate = null;
         current.updatedAt = new Date().toISOString();
         return current;
       });
+
       await chrome.alarms.clear(ALARM_NAME);
       return;
     }
 
     const updated = await mutateJob((current) => {
       if (!matchesActiveRun(current, jobId, runToken)) return current;
+      current.counts = normalizeCounts(current.counts);
       current.counts.pages += 1;
       current.cursor = page.next;
       current.currentDate = null;
@@ -220,46 +268,31 @@ async function processNextPage() {
 }
 
 async function backupReport(report, job, jobId, runToken) {
-  const child = sanitize(report.child_name || `child-${job.childId}`);
-  const date = report.date_written;
+  const child = sanitize(report.child_name || job.childName || `child-${job.childId}`);
+  const date = String(report.date_written || "");
   const root = `KidsNote/${child}`;
   const countsDelta = { images: 0, metadata: 0, failed: 0 };
   let sequence = Number(job.photoSequenceByDate?.[date] || 0);
 
   if (job.options.photos) {
-    const images = Array.isArray(report.attached_images) ? report.attached_images : [];
-
-    for (const image of images) {
-      if (!(await isRunActive(jobId, runToken))) {
-        return { completed: false };
-      }
-      if (!image?.original) continue;
-
-      sequence += 1;
-      const ext = extensionOf(image.original_file_name || image.original) || "jpg";
-      const serial = String(sequence).padStart(3, "0");
-      const photoRoot = job.options.photoFolderMode === "flat"
-        ? `${root}/Photos`
-        : `${root}/Photos/${date}`;
-
-      try {
-        await chrome.downloads.download({
-          url: image.original,
-          filename: `${photoRoot}/${date}-${serial}.${ext}`,
-          conflictAction: "overwrite",
-          saveAs: false
-        });
-        countsDelta.images += 1;
-      } catch (error) {
-        console.warn("Image download failed", error);
-        countsDelta.failed += 1;
-      }
-    }
+    const result = await downloadImages({
+      images: report.attached_images,
+      date,
+      root: `${root}/Photos`,
+      folderMode: job.options.photoFolderMode,
+      sequence,
+      jobId,
+      runToken
+    });
+    if (!result.completed) return { completed: false };
+    sequence = result.sequence;
+    countsDelta.images += result.images;
+    countsDelta.failed += result.failed;
   }
 
   if (!(await isRunActive(jobId, runToken))) return { completed: false };
 
-  const metadata = makeMetadata(report);
+  const metadata = makeReportMetadata(report);
 
   if (job.options.markdown) {
     const ok = await saveMetadataFile(`${root}/Diary/${date}.md`, makeMarkdown(metadata), "text/markdown");
@@ -278,8 +311,72 @@ async function backupReport(report, job, jobId, runToken) {
   return {
     completed: await isRunActive(jobId, runToken),
     sequence,
-    countsDelta
+    countsDelta,
+    childName: report.child_name || job.childName || null
   };
+}
+
+async function backupAlbum(album, date, job, jobId, runToken) {
+  const child = sanitize(job.childName || `child-${job.childId}`);
+  const root = `KidsNote/${child}/Album/Photos`;
+  const countsDelta = { images: 0, metadata: 0, failed: 0 };
+  let sequence = Number(job.photoSequenceByDate?.[date] || 0);
+
+  const result = await downloadImages({
+    images: album.attached_images,
+    date,
+    root,
+    folderMode: job.options.photoFolderMode,
+    sequence,
+    jobId,
+    runToken
+  });
+
+  if (!result.completed) return { completed: false };
+  sequence = result.sequence;
+  countsDelta.images += result.images;
+  countsDelta.failed += result.failed;
+
+  return {
+    completed: await isRunActive(jobId, runToken),
+    sequence,
+    countsDelta,
+    childName: job.childName || null
+  };
+}
+
+async function downloadImages({ images, date, root, folderMode, sequence, jobId, runToken }) {
+  const list = Array.isArray(images) ? images : [];
+  let imagesSaved = 0;
+  let failed = 0;
+  let nextSequence = Number(sequence || 0);
+
+  for (const image of list) {
+    if (!(await isRunActive(jobId, runToken))) {
+      return { completed: false, sequence: nextSequence, images: imagesSaved, failed };
+    }
+    if (!image?.original) continue;
+
+    nextSequence += 1;
+    const ext = extensionOf(image.original_file_name || image.original) || "jpg";
+    const serial = String(nextSequence).padStart(3, "0");
+    const photoRoot = folderMode === "flat" ? root : `${root}/${date}`;
+
+    try {
+      await chrome.downloads.download({
+        url: image.original,
+        filename: `${photoRoot}/${date}-${serial}.${ext}`,
+        conflictAction: "overwrite",
+        saveAs: false
+      });
+      imagesSaved += 1;
+    } catch (error) {
+      console.warn("Image download failed", error);
+      failed += 1;
+    }
+  }
+
+  return { completed: true, sequence: nextSequence, images: imagesSaved, failed };
 }
 
 async function saveMetadataFile(filename, text, type) {
@@ -301,7 +398,7 @@ async function saveMetadataFile(filename, text, type) {
 async function saveDailyHtmlReport(job) {
   try {
     const rows = Array.isArray(job.dailyReportRows) ? job.dailyReportRows : [];
-    const child = sanitize(rows.find((row) => row.child_name)?.child_name || `child-${job.childId}`);
+    const child = sanitize(rows.find((row) => row.child_name)?.child_name || job.childName || `child-${job.childId}`);
     const html = makeDailyHtmlReport(rows, job);
     return saveMetadataFile(`KidsNote/${child}/Reports/daily-report.html`, html, "text/html");
   } catch (error) {
@@ -319,25 +416,31 @@ async function setCurrentDate(jobId, runToken, date) {
   });
 }
 
-async function commitReportProgress(jobId, runToken, report, result) {
+async function commitItemProgress(jobId, runToken, item, date, result) {
   let committed = false;
 
   await mutateJob((current) => {
     if (!matchesActiveRun(current, jobId, runToken)) return current;
 
-    const reportId = String(report.id);
-    const processed = new Set(current.processedReportIds || []);
-    if (!processed.has(reportId)) {
-      processed.add(reportId);
-      current.processedReportIds = [...processed];
-      current.counts.reports += 1;
+    const itemId = String(item.id);
+    const processed = new Set(current.processedItemIds || []);
+    if (!processed.has(itemId)) {
+      processed.add(itemId);
+      current.processedItemIds = [...processed];
+      current.counts = normalizeCounts(current.counts);
+      if (current.type === "album") current.counts.albums += 1;
+      else current.counts.reports += 1;
       current.counts.images += result.countsDelta.images;
       current.counts.metadata += result.countsDelta.metadata;
       current.counts.failed += result.countsDelta.failed;
       current.photoSequenceByDate = current.photoSequenceByDate || {};
-      current.photoSequenceByDate[report.date_written] = result.sequence;
-      current.dailyReportRows = current.dailyReportRows || [];
-      current.dailyReportRows.push(makeDailyReportRow(report));
+      current.photoSequenceByDate[date] = result.sequence;
+      if (result.childName && !current.childName) current.childName = result.childName;
+
+      if (current.type === "report") {
+        current.dailyReportRows = current.dailyReportRows || [];
+        current.dailyReportRows.push(makeDailyReportRow(item));
+      }
     }
 
     current.updatedAt = new Date().toISOString();
@@ -348,7 +451,7 @@ async function commitReportProgress(jobId, runToken, report, result) {
   return committed;
 }
 
-function makeMetadata(report) {
+function makeReportMetadata(report) {
   return {
     id: report.id,
     created: report.created ?? null,
@@ -408,24 +511,12 @@ function makeDailyReportRow(report) {
     health_status: report.health_status ?? null,
     temperature_status: report.temperature_status ?? null,
     temperature: report.temperature ?? null,
-    bath_status: report.bath_status ?? null,
     meal_status: report.meal_status ?? null,
     sleep_hour: report.sleep_hour ?? null,
     bowel_status: report.bowel_status ?? null,
-    nail_status: report.nail_status ?? null,
-    outdoor_activity_status: report.outdoor_activity_status ?? null,
-    food: compactValue(report.food),
-    nursing: compactValue(report.nursing),
-    sleep: compactValue(report.sleep),
-    bowel: compactValue(report.bowel),
     num_comments: report.num_comments ?? 0,
     reaction_count: report.reaction_count ?? 0,
-    activity_rate: report.activity_rate ?? null,
-    has_video: Boolean(report.attached_video || report.material_video),
-    attached_file_count: Array.isArray(report.attached_files) ? report.attached_files.length : 0,
-    is_sent_from_center: report.is_sent_from_center ?? null,
-    read_by_me: report.read_by_me ?? null,
-    read_date: report.read_by_parent?.date_read ?? null
+    activity_rate: report.activity_rate ?? null
   };
 }
 
@@ -456,169 +547,33 @@ function makeMarkdown(meta) {
 
 function makeDailyHtmlReport(inputRows, job) {
   const rows = [...inputRows].sort((a, b) => String(b.date || "").localeCompare(String(a.date || "")));
-  const childName = rows.find((row) => row.child_name)?.child_name || "KidsNote";
-  const months = summarizeMonths(rows);
+  const childName = rows.find((row) => row.child_name)?.child_name || job.childName || "KidsNote";
   const generatedAt = new Date().toLocaleString("ko-KR");
   const uniqueDates = new Set(rows.map((row) => row.date).filter(Boolean)).size;
-  const classNames = [...new Set(rows.map((row) => row.class_name).filter(Boolean))].join(", ") || "-";
-
-  const monthRows = months.map((m) => `
+  const tableRows = rows.map((row) => `
     <tr>
-      <td>${escapeHtml(m.month)}</td>
-      <td>${m.days}</td>
-      <td>${escapeHtml(displayValue("weather", m.weather))}</td>
-      <td>${escapeHtml(displayValue("mood_status", m.mood))}</td>
-      <td>${escapeHtml(displayValue("health_status", m.health))}</td>
-      <td>${escapeHtml(displayValue("meal_status", m.meal))}</td>
-      <td>${escapeHtml(displayValue("sleep_hour", m.sleep))}</td>
-      <td>${escapeHtml(displayValue("bowel_status", m.bowel))}</td>
-    </tr>`).join("");
-
-  const dailyRows = rows.map((row) => `
-    <tr data-month="${escapeHtml(String(row.date || "").slice(0, 7))}">
-      <td class="date">${escapeHtml(row.date || "-")}</td>
+      <td>${escapeHtml(row.date || "-")}</td>
       <td>${escapeHtml(displayValue("weather", row.weather))}</td>
       <td>${escapeHtml(displayValue("mood_status", row.mood_status))}</td>
       <td>${escapeHtml(displayValue("health_status", row.health_status))}</td>
-      <td>${escapeHtml(displayValue("temperature_status", row.temperature_status))}</td>
       <td>${escapeHtml(formatTemperature(row.temperature))}</td>
       <td>${escapeHtml(displayValue("meal_status", row.meal_status))}</td>
       <td>${escapeHtml(displayValue("sleep_hour", row.sleep_hour))}</td>
       <td>${escapeHtml(displayValue("bowel_status", row.bowel_status))}</td>
-      <td>${escapeHtml(displayValue("bath_status", row.bath_status))}</td>
-      <td>${escapeHtml(displayValue("nail_status", row.nail_status))}</td>
-      <td>${escapeHtml(displayValue("outdoor_activity_status", row.outdoor_activity_status))}</td>
-      <td>${escapeHtml(row.food || "-")}</td>
-      <td>${escapeHtml(row.nursing || "-")}</td>
-      <td>${escapeHtml(row.sleep || "-")}</td>
-      <td>${escapeHtml(row.bowel || "-")}</td>
       <td>${Number(row.num_comments || 0)}</td>
       <td>${Number(row.reaction_count || 0)}</td>
       <td>${escapeHtml(formatActivityRate(row.activity_rate))}</td>
-      <td>${row.has_video ? "있음" : "-"}</td>
-      <td>${Number(row.attached_file_count || 0)}</td>
       <td>${escapeHtml(row.class_name || "-")}</td>
       <td>${escapeHtml(row.author_name || "-")}</td>
     </tr>`).join("");
 
-  const monthOptions = months.map((m) => `<option value="${escapeHtml(m.month)}">${escapeHtml(m.month)}</option>`).join("");
-
   return `<!doctype html>
-<html lang="ko">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
+<html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${escapeHtml(childName)} - KidsNote 일별 데이터 리포트</title>
-<style>
-:root{font-family:Inter,Pretendard,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#17202a;background:#f6f7f9}*{box-sizing:border-box}body{margin:0;padding:28px}main{max-width:1600px;margin:auto}.hero{display:flex;justify-content:space-between;gap:20px;align-items:flex-end;margin-bottom:18px}.hero h1{font-size:28px;margin:0 0 6px}.muted{color:#667085;font-size:13px}.cards{display:grid;grid-template-columns:repeat(4,minmax(150px,1fr));gap:12px;margin:18px 0}.card{background:white;border:1px solid #e4e7ec;border-radius:14px;padding:16px}.card span{display:block;color:#667085;font-size:12px}.card strong{display:block;font-size:22px;margin-top:5px}.panel{background:white;border:1px solid #e4e7ec;border-radius:14px;padding:18px;margin-top:14px}.panel h2{font-size:18px;margin:0 0 12px}.controls{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-bottom:12px}.controls input,.controls select{padding:9px 10px;border:1px solid #d0d5dd;border-radius:8px;background:white;font:inherit}.table-wrap{overflow:auto;border:1px solid #eaecf0;border-radius:10px}table{border-collapse:collapse;width:100%;min-width:900px;font-size:12px}th,td{padding:9px 10px;border-bottom:1px solid #eaecf0;text-align:left;white-space:nowrap}th{position:sticky;top:0;background:#f9fafb;color:#475467;z-index:1}tbody tr:hover{background:#fcfcfd}.date{font-weight:700}.empty{padding:28px;text-align:center;color:#667085}.foot{margin-top:16px;color:#98a2b3;font-size:11px}@media(max-width:760px){body{padding:14px}.hero{display:block}.cards{grid-template-columns:repeat(2,1fr)}}@media print{body{padding:0;background:white}.controls{display:none}.panel,.card{break-inside:avoid}th{position:static}}
-</style>
-</head>
-<body>
-<main>
-  <div class="hero">
-    <div><h1>${escapeHtml(childName)} · 일별 데이터 리포트</h1><div class="muted">사진과 알림장 본문은 제외하고 생활기록 및 상태 데이터만 정리했습니다.</div></div>
-    <div class="muted">생성: ${escapeHtml(generatedAt)}</div>
-  </div>
-  <section class="cards">
-    <div class="card"><span>기록 일수</span><strong>${uniqueDates}</strong></div>
-    <div class="card"><span>백업 기간</span><strong style="font-size:15px">${escapeHtml(job.startDate)} ~ ${escapeHtml(job.endDate)}</strong></div>
-    <div class="card"><span>알림장 건수</span><strong>${rows.length}</strong></div>
-    <div class="card"><span>반</span><strong style="font-size:15px">${escapeHtml(classNames)}</strong></div>
-  </section>
-
-  <section class="panel">
-    <h2>월별 요약</h2>
-    <div class="table-wrap">
-      <table>
-        <thead><tr><th>월</th><th>기록일</th><th>주요 날씨</th><th>주요 기분</th><th>주요 건강</th><th>주요 식사</th><th>주요 수면</th><th>주요 배변</th></tr></thead>
-        <tbody>${monthRows || '<tr><td colspan="8" class="empty">데이터 없음</td></tr>'}</tbody>
-      </table>
-    </div>
-  </section>
-
-  <section class="panel">
-    <h2>일별 기록</h2>
-    <div class="controls">
-      <label>월 <select id="monthFilter"><option value="">전체</option>${monthOptions}</select></label>
-      <label>검색 <input id="search" type="search" placeholder="날씨, 상태, 반, 작성자…"></label>
-      <span id="visibleCount" class="muted"></span>
-    </div>
-    <div class="table-wrap">
-      <table id="dailyTable">
-        <thead><tr><th>날짜</th><th>날씨</th><th>기분</th><th>건강</th><th>체온상태</th><th>체온</th><th>식사</th><th>수면시간</th><th>배변</th><th>목욕</th><th>손발톱</th><th>야외활동</th><th>식사상세</th><th>간호</th><th>수면상세</th><th>배변상세</th><th>댓글</th><th>반응</th><th>활동률</th><th>영상</th><th>첨부파일</th><th>반</th><th>작성자</th></tr></thead>
-        <tbody>${dailyRows || '<tr><td colspan="23" class="empty">데이터 없음</td></tr>'}</tbody>
-      </table>
-    </div>
-  </section>
-  <div class="foot">KidsNote Backup · 사진 URL 및 알림장 본문은 이 리포트에 포함하지 않습니다.</div>
-</main>
-<script>
-(() => {
-  const month = document.getElementById('monthFilter');
-  const search = document.getElementById('search');
-  const count = document.getElementById('visibleCount');
-  const rows = [...document.querySelectorAll('#dailyTable tbody tr[data-month]')];
-  function apply(){
-    const m = month.value;
-    const q = search.value.trim().toLowerCase();
-    let visible = 0;
-    for(const row of rows){
-      const okMonth = !m || row.dataset.month === m;
-      const okSearch = !q || row.textContent.toLowerCase().includes(q);
-      const show = okMonth && okSearch;
-      row.hidden = !show;
-      if(show) visible += 1;
-    }
-    count.textContent = visible + '건 표시';
-  }
-  month.addEventListener('change', apply);
-  search.addEventListener('input', apply);
-  apply();
-})();
-</script>
-</body>
-</html>`;
-}
-
-function summarizeMonths(rows) {
-  const groups = new Map();
-  for (const row of rows) {
-    const month = String(row.date || "").slice(0, 7);
-    if (!/^\d{4}-\d{2}$/.test(month)) continue;
-    if (!groups.has(month)) groups.set(month, []);
-    groups.get(month).push(row);
-  }
-
-  return [...groups.entries()]
-    .sort((a, b) => b[0].localeCompare(a[0]))
-    .map(([month, items]) => ({
-      month,
-      days: new Set(items.map((row) => row.date).filter(Boolean)).size,
-      weather: mode(items.map((row) => row.weather)),
-      mood: mode(items.map((row) => row.mood_status)),
-      health: mode(items.map((row) => row.health_status)),
-      meal: mode(items.map((row) => row.meal_status)),
-      sleep: mode(items.map((row) => row.sleep_hour)),
-      bowel: mode(items.map((row) => row.bowel_status))
-    }));
-}
-
-function mode(values) {
-  const counts = new Map();
-  for (const value of values) {
-    if (value === null || value === undefined || value === "") continue;
-    const key = String(value);
-    counts.set(key, (counts.get(key) || 0) + 1);
-  }
-  let best = null;
-  let bestCount = 0;
-  for (const [key, count] of counts) {
-    if (count > bestCount) {
-      best = key;
-      bestCount = count;
-    }
-  }
-  return best;
+<style>body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:#f6f7f9;color:#17202a;margin:0;padding:24px}main{max-width:1400px;margin:auto}.card{background:#fff;border:1px solid #e4e7ec;border-radius:12px;padding:16px;margin-bottom:14px}.summary{display:flex;gap:12px;flex-wrap:wrap}.summary div{background:#f8fafc;border-radius:8px;padding:10px 14px}table{border-collapse:collapse;width:100%;font-size:12px}th,td{padding:8px;border-bottom:1px solid #eaecf0;text-align:left;white-space:nowrap}th{background:#f9fafb}.wrap{overflow:auto}.muted{color:#667085;font-size:12px}</style></head>
+<body><main><div class="card"><h1>${escapeHtml(childName)} · 일별 데이터 리포트</h1><div class="muted">생성: ${escapeHtml(generatedAt)}</div><div class="summary"><div>기간<br><b>${escapeHtml(job.startDate)} ~ ${escapeHtml(job.endDate)}</b></div><div>기록 일수<br><b>${uniqueDates}</b></div><div>알림장 건수<br><b>${rows.length}</b></div></div></div>
+<div class="card wrap"><table><thead><tr><th>날짜</th><th>날씨</th><th>기분</th><th>건강</th><th>체온</th><th>식사</th><th>수면</th><th>배변</th><th>댓글</th><th>반응</th><th>활동률</th><th>반</th><th>작성자</th></tr></thead><tbody>${tableRows || '<tr><td colspan="13">데이터 없음</td></tr>'}</tbody></table></div>
+</main></body></html>`;
 }
 
 function displayValue(field, value) {
@@ -628,13 +583,9 @@ function displayValue(field, value) {
     weather: { sunny: "맑음", mostly_cloudy: "구름 많음", cloudy: "흐림", overcast: "흐림", rain: "비", rainy: "비", snow: "눈" },
     mood_status: { good: "좋음", normal: "보통", bad: "나쁨" },
     health_status: { good: "좋음", normal: "보통", bad: "나쁨" },
-    temperature_status: { normal: "정상", high: "높음", low: "낮음" },
     meal_status: { fixed: "정량", more: "많이", less: "적게", none: "안 먹음" },
     sleep_hour: { none: "안 잠", below_1: "1시간 미만", between_1_2: "1~2시간", above_2: "2시간 이상" },
-    bowel_status: { none: "안 함", normal: "보통", hard: "딱딱함", loose: "묽음" },
-    bath_status: { done: "함", none: "안 함" },
-    nail_status: { good: "양호", need: "정리 필요" },
-    outdoor_activity_status: { done: "함", none: "안 함" }
+    bowel_status: { none: "안 함", normal: "보통", hard: "딱딱함", loose: "묽음" }
   };
   return maps[field]?.[key] || key;
 }
@@ -642,7 +593,7 @@ function displayValue(field, value) {
 function formatTemperature(value) {
   if (value === null || value === undefined || value === "") return "-";
   if (typeof value === "number") return `${value}℃`;
-  if (typeof value === "object") return compactValue(value) || "-";
+  if (typeof value === "object") return JSON.stringify(value);
   return String(value);
 }
 
@@ -653,38 +604,44 @@ function formatActivityRate(value) {
   return String(value);
 }
 
-function compactValue(value) {
-  if (value === null || value === undefined || value === "") return "";
-  if (Array.isArray(value)) {
-    return value.map(compactValue).filter(Boolean).join(" / ");
-  }
-  if (typeof value === "object") {
-    return Object.entries(value)
-      .filter(([, v]) => v !== null && v !== undefined && v !== "")
-      .map(([k, v]) => `${k}: ${compactValue(v)}`)
-      .join(", ");
-  }
-  return String(value);
-}
+function albumDate(album) {
+  const value = album?.created;
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
 
-function escapeHtml(value) {
-  return String(value ?? "")
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Seoul",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit"
+  }).formatToParts(date);
+
+  const map = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  return `${map.year}-${map.month}-${map.day}`;
 }
 
 function validatePayload(payload) {
   if (!payload || !Number.isInteger(payload.tabId)) throw new Error("KidsNote 탭을 먼저 열어주세요.");
-  if (!/^\d+$/.test(String(payload.childId || ""))) throw new Error("숫자로 된 child ID를 입력하세요.");
+  if (!["report", "album"].includes(payload.type || "report")) throw new Error("백업 종류를 확인하세요.");
+  if (!/^\d+$/.test(String(payload.childId || ""))) throw new Error("숫자로 된 Child ID를 입력하세요.");
   if (!/^\d{4}-\d{2}-\d{2}$/.test(payload.startDate || "")) throw new Error("시작일을 확인하세요.");
   if (!/^\d{4}-\d{2}-\d{2}$/.test(payload.endDate || "")) throw new Error("종료일을 확인하세요.");
   if (payload.startDate > payload.endDate) throw new Error("시작일은 종료일보다 늦을 수 없습니다.");
   if (payload.options?.photoFolderMode && !["date", "flat"].includes(payload.options.photoFolderMode)) {
     throw new Error("사진 저장 방식을 확인하세요.");
   }
+}
+
+function normalizeCounts(counts = {}) {
+  return {
+    pages: Number(counts.pages || 0),
+    reports: Number(counts.reports || 0),
+    albums: Number(counts.albums || 0),
+    images: Number(counts.images || 0),
+    metadata: Number(counts.metadata || 0),
+    failed: Number(counts.failed || 0)
+  };
 }
 
 function sanitize(value) {
@@ -700,17 +657,21 @@ function extensionOf(value) {
   return match ? match[1].toLowerCase() : null;
 }
 
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
 function makeToken() {
   return crypto.randomUUID();
 }
 
 function matchesActiveRun(job, jobId, runToken) {
-  return Boolean(
-    job &&
-    job.status === "running" &&
-    job.jobId === jobId &&
-    job.runToken === runToken
-  );
+  return Boolean(job && job.status === "running" && job.jobId === jobId && job.runToken === runToken);
 }
 
 function scheduleNext(delay) {
@@ -750,7 +711,11 @@ async function ensureRunningJobIdentity() {
     if (!current || current.status !== "running") return current;
     current.jobId = current.jobId || makeToken();
     current.runToken = current.runToken || makeToken();
+    current.type = current.type === "album" ? "album" : "report";
+    current.processedItemIds = current.processedItemIds || current.processedReportIds || [];
+    current.photoSequenceByDate = current.photoSequenceByDate || {};
     current.dailyReportRows = current.dailyReportRows || [];
+    current.counts = normalizeCounts(current.counts);
     return current;
   });
 }
