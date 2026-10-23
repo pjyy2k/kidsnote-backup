@@ -1,7 +1,5 @@
 const el = (id) => document.getElementById(id);
 const statusNames = { running: "진행 중", paused: "일시정지", completed: "완료", error: "오류", cancelled: "취소됨" };
-const LATEST_MANIFEST_URL = "https://raw.githubusercontent.com/pjyy2k/kidsnote-backup/main/manifest.json";
-const REPOSITORY_URL = "https://github.com/pjyy2k/kidsnote-backup";
 let activeTab = null;
 
 init().catch(showError);
@@ -14,7 +12,6 @@ async function init() {
   bindEvents();
   updateFolderExample();
   showInstalledVersion();
-  checkLatestVersion().catch((error) => console.debug("Version check failed", error));
   await refreshState();
   if (activeTab?.url?.startsWith("https://www.kidsnote.com/")) {
     detectChild({ quiet: true }).catch(() => {});
@@ -31,52 +28,11 @@ function bindEvents() {
   el("cancelBtn").addEventListener("click", () => send("CANCEL").then(refreshState).catch(showError));
   el("photoModeDate").addEventListener("change", updateFolderExample);
   el("photoModeFlat").addEventListener("change", updateFolderExample);
-  el("updateBtn").addEventListener("click", () => openRepository().catch(showError));
 }
 
 function showInstalledVersion() {
   const version = chrome.runtime.getManifest().version;
   el("versionText").textContent = `v${version}`;
-}
-
-async function checkLatestVersion() {
-  const currentVersion = chrome.runtime.getManifest().version;
-  const response = await fetch(`${LATEST_MANIFEST_URL}?t=${Date.now()}`, {
-    method: "GET",
-    cache: "no-store",
-    headers: { Accept: "application/json" }
-  });
-
-  if (!response.ok) throw new Error(`GitHub version check failed (${response.status})`);
-
-  const manifest = await response.json();
-  const latestVersion = String(manifest?.version || "").trim();
-  if (!latestVersion) throw new Error("Latest manifest version is missing.");
-
-  if (compareVersions(latestVersion, currentVersion) > 0) {
-    el("latestVersion").textContent = `v${latestVersion}`;
-    el("currentVersion").textContent = `v${currentVersion}`;
-    el("updateNotice").hidden = false;
-  } else {
-    el("updateNotice").hidden = true;
-  }
-}
-
-function compareVersions(a, b) {
-  const left = String(a).split(".").map((part) => Number.parseInt(part, 10) || 0);
-  const right = String(b).split(".").map((part) => Number.parseInt(part, 10) || 0);
-  const length = Math.max(left.length, right.length);
-
-  for (let i = 0; i < length; i += 1) {
-    const diff = (left[i] || 0) - (right[i] || 0);
-    if (diff !== 0) return diff;
-  }
-  return 0;
-}
-
-async function openRepository() {
-  await chrome.tabs.create({ url: REPOSITORY_URL, active: true });
-  window.close();
 }
 
 async function openKidsNoteReport() {
