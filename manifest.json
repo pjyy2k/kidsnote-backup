@@ -1,9 +1,10 @@
 {
   "manifest_version": 3,
-  "name": "KidsNote Backup",
-  "version": "0.3.0",
-  "description": "Back up KidsNote reports, album posts, and original photos by date range.",
-  "permissions": ["storage", "downloads", "tabs", "alarms"],
+  "name": "__MSG_extensionName__",
+  "version": "0.3.1",
+  "default_locale": "ko",
+  "description": "__MSG_extensionDescription__",
+  "permissions": ["storage", "downloads", "alarms"],
   "host_permissions": [
     "https://*.kidsnote.com/*",
     "https://up-kids-kage.kakao.com/*",
@@ -17,5 +18,5 @@
       "run_at": "document_idle"
     }
   ],
-  "action": {"default_title": "KidsNote Backup", "default_popup": "popup.html"}
+  "action": {"default_title": "__MSG_actionTitle__", "default_popup": "popup.html"}
 }
