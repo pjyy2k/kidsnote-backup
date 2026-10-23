@@ -1,0 +1,11 @@
+{
+  "extensionName": {
+    "message": "KidsNote Backup"
+  },
+  "extensionDescription": {
+    "message": "키즈노트 알림장과 앨범의 원본 사진 및 데이터를 기간별로 백업합니다."
+  },
+  "actionTitle": {
+    "message": "KidsNote Backup"
+  }
+}
