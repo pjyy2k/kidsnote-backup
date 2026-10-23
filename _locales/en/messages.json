@@ -1,0 +1,11 @@
+{
+  "extensionName": {
+    "message": "KidsNote Backup"
+  },
+  "extensionDescription": {
+    "message": "Back up KidsNote reports, album posts, original photos, and related data by date range."
+  },
+  "actionTitle": {
+    "message": "KidsNote Backup"
+  }
+}
