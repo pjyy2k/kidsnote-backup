@@ -25,3 +25,12 @@ table{width:100%;border-collapse:collapse;margin:10px 0;font-size:15px}th,td{bor
 .pager a{font-weight:700;text-decoration:none}
 footer{margin-top:22px;color:#98a2b3;font-size:13px}
 @media(max-width:560px){main{padding:16px 16px 32px}.choices{grid-template-columns:1fr}h1{font-size:24px}.steps{font-size:12px}}
+.flow{display:flex;gap:6px;list-style:none;counter-reset:f;padding:0;margin:16px 0 24px}
+.flow li{flex:1;margin:0;text-align:center;font-weight:700;padding:14px 4px;background:#eff4ff;border-radius:10px;counter-increment:f}
+.flow li:before{content:counter(f);display:block;color:#1d55cb;font-size:20px}
+.pair{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:12px 0}
+.pair div{background:#f8fafc;border:1px solid #e4e7ec;border-radius:10px;padding:10px 12px}
+.pair b,.pair span{display:block}.pair span{color:#667085;font-size:14px}
+.crumb{display:flex;flex-wrap:wrap;gap:6px;align-items:center;color:#667085}.crumb span{background:#f2f4f7;color:#172237;border-radius:6px;padding:3px 9px;font-weight:600}
+.small{color:#667085;font-size:14px}.more{margin-top:18px}
+.pager a.btn{color:#fff}
