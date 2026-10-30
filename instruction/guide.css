@@ -1,0 +1,27 @@
+*{box-sizing:border-box}
+body{margin:0;background:#f3f5f9;color:#172237;font:16px/1.7 -apple-system,BlinkMacSystemFont,"Segoe UI","Malgun Gothic",sans-serif}
+main{max-width:760px;margin:auto;background:#fff;min-height:100vh;padding:24px 24px 40px}
+.steps{display:flex;gap:6px;list-style:none;margin:0 0 26px;padding:0;font-size:13px}
+.steps li{flex:1;margin:0}
+.steps a{display:block;height:100%;padding:8px 4px;text-align:center;text-decoration:none;color:#667085;background:#f2f4f7;border-radius:8px}
+.steps a[aria-current]{background:#1d55cb;color:#fff;font-weight:700}
+h1{font-size:27px;line-height:1.35;margin:0 0 8px}
+.intro{color:#667085;margin:0 0 22px}
+section{border-top:1px solid #e4e7ec;padding:22px 0}
+h2{font-size:19px;margin:0 0 10px;display:flex;align-items:center;gap:10px}
+.n{flex:none;display:inline-grid;place-items:center;width:30px;height:30px;border-radius:50%;background:#1d55cb;color:#fff;font-size:14px}
+p{margin:6px 0 12px}ol,ul{margin:6px 0 12px;padding-left:24px}li{margin:4px 0}
+a{color:#175cd3}code{background:#f2f4f7;border-radius:5px;padding:2px 6px;font-size:14px}
+.shot{margin:12px 0;border:1px solid #d0d5dd;border-radius:10px;overflow:hidden}.shot svg{display:block;width:100%;height:auto}
+.note{border-radius:10px;padding:11px 14px;margin:12px 0;font-size:15px}
+.tip{background:#eff6ff;color:#1e40af}.warn{background:#fffbeb;color:#92400e}.ok{background:#ecfdf3;color:#166534}
+.btn{display:inline-block;background:#1d55cb;color:#fff;text-decoration:none;font-weight:700;border-radius:10px;padding:11px 18px}
+.choices{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.card{display:block;text-decoration:none;color:inherit;border:1px solid #d0d5dd;border-radius:14px;padding:20px}
+.card:hover{border-color:#667085}.card b{display:block;font-size:19px}.card span{color:#667085;font-size:14px}
+.card.best{border:2px solid #0f766e;background:#f0fdfa}.card em{font-style:normal;font-weight:700;color:#0f766e;font-size:13px}
+table{width:100%;border-collapse:collapse;margin:10px 0;font-size:15px}th,td{border:1px solid #e4e7ec;padding:9px 10px;text-align:left;vertical-align:top}th{background:#f8fafc}td:first-child,th:first-child{width:32%;word-break:keep-all}
+.pager{display:flex;justify-content:space-between;gap:10px;margin-top:10px;padding-top:22px;border-top:1px solid #e4e7ec}
+.pager a{font-weight:700;text-decoration:none}
+footer{margin-top:22px;color:#98a2b3;font-size:13px}
+@media(max-width:560px){main{padding:16px 16px 32px}.choices{grid-template-columns:1fr}h1{font-size:24px}.steps{font-size:12px}}

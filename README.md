@@ -39,8 +39,7 @@ https://microsoftedge.microsoft.com/addons/detail/njfjjkbanciimhmfecjdafnhoiboaj
 
 개발자 모드나 ZIP 다운로드는 필요하지 않습니다.
 
-- [Edge 공식 스토어 설치 매뉴얼](instruction/edge.html)
-- [기존 초간단 사용 매뉴얼](instruction/index.html) — 화면 예시는 Chrome 기준이지만 백업 사용 방법은 동일합니다.
+- [단계별 사용 매뉴얼](instruction/index.html) — 설치부터 백업, 파일 확인, 문제 해결까지 순서대로 안내합니다.
 
 ### Google Chrome — 수동 설치
 
