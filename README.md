@@ -22,37 +22,29 @@ Chrome/Edge Manifest V3 확장프로그램으로, 로그인된 KidsNote 세션�
 
 ## 설치
 
-### Microsoft Edge — 권장
+Chrome과 Edge 모두 공식 스토어에서 바로 설치할 수 있습니다. 개발자 모드나 ZIP 다운로드는 필요하지 않습니다.
 
-Edge 사용자는 Microsoft Edge Add-ons 공식 스토어에서 바로 설치할 수 있습니다.
+- [Chrome 웹 스토어](https://chromewebstore.google.com/detail/kidsnote-backup/lbhnlacffdmcdiadllkjjccgcddamnpj)
+- [Microsoft Edge Add-ons](https://microsoftedge.microsoft.com/addons/detail/njfjjkbanciimhmfecjdafnhoiboajic)
 
-**공식 설치 페이지**  
-https://microsoftedge.microsoft.com/addons/detail/njfjjkbanciimhmfecjdafnhoiboajic
-
-1. 위 링크를 Microsoft Edge에서 엽니다.
-2. **다운로드 / Get** 버튼을 누릅니다.
-3. 확인 창에서 **확장 추가**를 누릅니다.
-4. 주소창 오른쪽의 **확장(퍼즐 모양) 아이콘**을 누릅니다.
-5. `KidsNote Backup` 옆의 고정 아이콘을 눌러 툴바에 고정합니다.
-6. KidsNote에 로그인한 뒤 알림장 화면을 한 번 엽니다.
-7. 툴바의 `KidsNote Backup` 아이콘을 눌러 백업을 시작합니다.
-
-개발자 모드나 ZIP 다운로드는 필요하지 않습니다.
+1. 사용 중인 브라우저에서 해당 스토어 페이지를 엽니다. Edge Add-ons는 Edge에서만 설치할 수 있습니다.
+2. **Chrome에 추가**(Edge는 **다운로드 / Get**)를 누릅니다.
+3. 확인 창에서 **확장 프로그램 추가**(Edge는 **확장 추가**)를 누릅니다.
+4. 주소창 옆에 `KidsNote Backup` 아이콘이 보이는지 확인합니다. 안 보이면 **확장(퍼즐 모양) 아이콘**을 눌러 고정합니다.
+5. KidsNote에 로그인한 뒤 알림장 화면을 한 번 엽니다. 설치 전에 열어 둔 KidsNote 탭은 새로고침합니다.
+6. 툴바의 `KidsNote Backup` 아이콘을 눌러 백업을 시작합니다.
 
 - [단계별 사용 매뉴얼](instruction/index.html) — 설치부터 백업, 파일 확인, 문제 해결까지 순서대로 안내합니다.
 
-### Google Chrome — 수동 설치
+### 저장소 코드로 직접 설치 (개발자용)
 
-Chrome Web Store 등록 전까지는 저장소의 압축 파일을 이용해 설치합니다.
+스토어 버전이 아닌 최신 코드를 실행할 때만 사용합니다. 스토어 버전과 함께 설치하면 아이콘이 2개로 보이므로 하나는 삭제하세요.
 
 1. 이 저장소를 내려받습니다.
 2. Chrome에서 `chrome://extensions`를 엽니다.
 3. **개발자 모드**를 켭니다.
 4. **압축해제된 확장 프로그램을 로드합니다**를 눌러 저장소 폴더를 선택합니다.
 5. 주소창 오른쪽의 **확장(퍼즐 모양) 아이콘**을 눌러 `KidsNote Backup`을 고정합니다.
-6. KidsNote에 로그인합니다.
-7. 확장 설치 후 이미 열려 있던 KidsNote 탭이라면 한 번 새로고침합니다.
-8. KidsNote 알림장 화면을 한 번 연 뒤 확장프로그램을 실행하면 Child ID와 원/반 정보 자동 감지가 쉬워집니다.
 
 ## 백업 방법
 

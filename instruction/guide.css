@@ -19,7 +19,6 @@ a{color:#175cd3}code{background:#f2f4f7;border-radius:5px;padding:2px 6px;font-s
 .choices{display:grid;grid-template-columns:1fr 1fr;gap:14px}
 .card{display:block;text-decoration:none;color:inherit;border:1px solid #d0d5dd;border-radius:14px;padding:20px}
 .card:hover{border-color:#667085}.card b{display:block;font-size:19px}.card span{color:#667085;font-size:14px}
-.card.best{border:2px solid #0f766e;background:#f0fdfa}.card em{font-style:normal;font-weight:700;color:#0f766e;font-size:13px}
 table{width:100%;border-collapse:collapse;margin:10px 0;font-size:15px}th,td{border:1px solid #e4e7ec;padding:9px 10px;text-align:left;vertical-align:top}th{background:#f8fafc}td:first-child,th:first-child{width:32%;word-break:keep-all}
 .pager{display:flex;justify-content:space-between;gap:10px;margin-top:10px;padding-top:22px;border-top:1px solid #e4e7ec}
 .pager a{font-weight:700;text-decoration:none}
@@ -34,3 +33,5 @@ footer{margin-top:22px;color:#98a2b3;font-size:13px}
 .crumb{display:flex;flex-wrap:wrap;gap:6px;align-items:center;color:#667085}.crumb span{background:#f2f4f7;color:#172237;border-radius:6px;padding:3px 9px;font-weight:600}
 .small{color:#667085;font-size:14px}.more{margin-top:18px}
 .pager a.btn{color:#fff}
+details{border-top:1px solid #e4e7ec;padding:14px 0}
+summary{font-weight:700;color:#175cd3;cursor:pointer}
