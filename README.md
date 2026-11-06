@@ -13,7 +13,7 @@ Chrome/Edge Manifest V3 확장프로그램으로, 로그인된 KidsNote 세션�
 - 사진 저장 방식을 **날짜별 폴더** 또는 **한 폴더에 모두 저장** 중 선택
 - 사진 파일명은 `yyyy-mm-dd-일련번호` 형식으로 저장
 - 알림장 Markdown과 JSON 저장
-- 알림장 백업 완료 시 `Reports/daily-report.html` 생성
+- 알림장 백업 완료 시 `Reports/daily-report-시작일_종료일.html` 생성
 - 앨범 사진은 알림장 사진과 섞이지 않도록 `Album/Photos`에 별도 저장
 - 앨범 API에 필요한 Child / Center / Class ID를 가능한 범위에서 자동 감지
 - 중단 후 이어받기, 일시정지, 취소
@@ -130,7 +130,7 @@ KidsNote/
    ├─ JSON/
    │  └─ 2026-10-21.json
    └─ Reports/
-      └─ daily-report.html
+      └─ daily-report-2026-10-20_2026-10-21.html
 ```
 
 ### 앨범 — 날짜별 사진 폴더

@@ -576,7 +576,7 @@ async function saveDailyHtmlReport(job) {
     const rows = Array.isArray(job.dailyReportRows) ? job.dailyReportRows : [];
     const child = sanitize(rows.find((row) => row.child_name)?.child_name || job.childName || `child-${job.childId}`);
     const html = makeDailyHtmlReport(rows, job);
-    return saveMetadataFile(`KidsNote/${child}/Reports/daily-report.html`, html, "text/html");
+    return saveMetadataFile(`KidsNote/${child}/Reports/daily-report-${job.startDate}_${job.endDate}.html`, html, "text/html");
   } catch (error) {
     console.warn("HTML report generation failed", error);
     return false;
