@@ -24,7 +24,8 @@ function bindEvents() {
   el("startReportBtn").addEventListener("click", () => startBackup("report").catch(showError));
   el("startAlbumBtn").addEventListener("click", () => startBackup("album").catch(showError));
   el("pauseBtn").addEventListener("click", () => send("PAUSE").then(refreshState).catch(showError));
-  el("resumeBtn").addEventListener("click", () => send("RESUME").then(refreshState).catch(showError));
+  el("resumeBtn").addEventListener("click", () => resumeBackup().catch(showError));
+  el("retryFailedBtn").addEventListener("click", () => retryFailed().catch(showError));
   el("cancelBtn").addEventListener("click", () => send("CANCEL").then(refreshState).catch(showError));
   el("photoModeDate").addEventListener("change", updateFolderExample);
   el("photoModeFlat").addEventListener("change", updateFolderExample);
@@ -130,6 +131,21 @@ async function startBackup(type) {
   render(response.job);
 }
 
+async function resumeBackup() {
+  clearError();
+  const onKidsNote = activeTab?.id && activeTab.url?.startsWith("https://www.kidsnote.com/");
+  const response = await send("RESUME", { tabId: onKidsNote ? activeTab.id : undefined });
+  if (!response.ok) throw new Error(response.error || "이어받기 실패");
+  render(response.job);
+}
+
+async function retryFailed() {
+  clearError();
+  const response = await send("RETRY_FAILED");
+  if (!response.ok) throw new Error(response.error || "다시 받기 실패");
+  render(response.job);
+}
+
 function selectedPhotoFolderMode() {
   return document.querySelector('input[name="photoFolderMode"]:checked')?.value || "date";
 }
@@ -155,7 +171,8 @@ function render(job) {
   const counts = job?.counts || {};
   const type = job?.type || null;
   el("jobType").textContent = type === "album" ? "앨범" : type === "report" ? "알림장" : "-";
-  el("status").textContent = job ? (statusNames[job.status] || job.status) : "대기";
+  const retrying = job?.status === "running" && job.mode === "retry";
+  el("status").textContent = retrying ? "실패한 사진 다시 받는 중" : job ? (statusNames[job.status] || job.status) : "대기";
   el("currentDate").textContent = job?.currentDate || "-";
   el("pages").textContent = counts.pages || 0;
   el("itemsLabel").textContent = type === "album" ? "앨범" : "알림장";
@@ -171,6 +188,9 @@ function render(job) {
   el("pauseBtn").disabled = !running;
   el("resumeBtn").disabled = !job || !["paused", "error"].includes(job.status);
   el("cancelBtn").disabled = !job || ["completed", "cancelled"].includes(job.status);
+  const failedCount = job?.failedDownloads?.length || 0;
+  el("retryFailedBtn").textContent = failedCount ? `실패한 사진 다시 받기 (${failedCount})` : "실패한 사진 다시 받기";
+  el("retryFailedBtn").disabled = running || failedCount === 0;
 }
 
 function ensureKidsNoteTab() {

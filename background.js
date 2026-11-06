@@ -1,8 +1,20 @@
 const JOB_KEY = "kidsnoteBackupJob";
 const ALARM_NAME = "kidsnoteBackupNext";
+const MAX_CONCURRENT_DOWNLOADS = 3;
+const DOWNLOAD_WAIT_TIMEOUT_MS = 5 * 60 * 1000;
+const DOWNLOAD_RETRY_LIMIT = 2;
+const DOWNLOAD_RETRY_DELAY_MS = 2000;
+const RETRY_BATCH_SIZE = 30;
+const KIDSNOTE_TAB_URL = "https://www.kidsnote.com/*";
 
 let mutationQueue = Promise.resolve();
 let processing = false;
+
+// A running job survives the service worker or the browser being restarted: re-arm its alarm on wake-up.
+chrome.runtime.onStartup.addListener(() => {
+  ensureRunningJobHasAlarm().catch((error) => console.error("Resume check failed", error));
+});
+ensureRunningJobHasAlarm().catch((error) => console.error("Resume check failed", error));
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   handleMessage(message)
@@ -29,7 +41,9 @@ async function handleMessage(message) {
     case "PAUSE":
       return pauseJob();
     case "RESUME":
-      return resumeJob();
+      return resumeJob(message.tabId);
+    case "RETRY_FAILED":
+      return retryFailedJob();
     case "CANCEL":
       return cancelJob();
     default:
@@ -84,6 +98,8 @@ async function startJob(payload) {
     processedItemIds: [],
     photoSequenceByDate: {},
     dailyReportRows: [],
+    failedDownloads: [],
+    mode: null,
     counts: { pages: 0, reports: 0, albums: 0, images: 0, metadata: 0, failed: 0 },
     options: {
       photos: type === "album" ? true : payload.options?.photos !== false,
@@ -115,12 +131,13 @@ async function pauseJob() {
   return { ok: true, job };
 }
 
-async function resumeJob() {
+async function resumeJob(tabId) {
   const job = await mutateJob((current) => {
     if (!current) throw new Error("저장된 백업 작업이 없습니다.");
     if (["completed", "cancelled"].includes(current.status)) {
       throw new Error("이미 종료된 작업입니다. 새 백업을 시작하세요.");
     }
+    if (tabId) current.tabId = tabId;
 
     current.jobId = current.jobId || makeToken();
     current.runToken = makeToken();
@@ -138,6 +155,88 @@ async function resumeJob() {
   await chrome.alarms.clear(ALARM_NAME);
   scheduleNext(100);
   return { ok: true, job };
+}
+
+async function retryFailedJob() {
+  const job = await mutateJob((current) => {
+    if (!current) throw new Error("저장된 백업 작업이 없습니다.");
+    if (current.status === "running") throw new Error("백업이 끝나거나 일시정지된 뒤 다시 시도하세요.");
+    const failed = current.failedDownloads || [];
+    if (failed.length === 0) throw new Error("다시 받을 실패한 사진이 없습니다.");
+
+    // After the retry, return to where the job was; an errored backup comes back as paused so it can be resumed.
+    current.retryReturnStatus = current.status === "error" ? "paused" : current.status;
+    current.mode = "retry";
+    current.retryQueue = [...failed];
+    current.jobId = current.jobId || makeToken();
+    current.runToken = makeToken();
+    current.status = "running";
+    current.error = null;
+    current.updatedAt = new Date().toISOString();
+    return current;
+  });
+
+  await chrome.alarms.clear(ALARM_NAME);
+  scheduleNext(100);
+  return { ok: true, job };
+}
+
+async function processRetryBatch(jobId, runToken) {
+  const job = await getJob();
+  const batch = (job.retryQueue || []).slice(0, RETRY_BATCH_SIZE);
+  const result = await downloadEntries(batch, jobId, runToken);
+  if (!result.completed) return;
+
+  const updated = await mutateJob((current) => {
+    if (!matchesActiveRun(current, jobId, runToken)) return current;
+    const saved = new Set(result.succeeded.map((entry) => entry.filename));
+    current.retryQueue = (current.retryQueue || []).slice(batch.length);
+    current.failedDownloads = (current.failedDownloads || []).filter((entry) => !saved.has(entry.filename));
+    current.counts = normalizeCounts(current.counts);
+    current.counts.images += result.succeeded.length;
+    current.counts.failed = Math.max(0, current.counts.failed - result.succeeded.length);
+
+    if (current.retryQueue.length === 0) {
+      current.status = current.retryReturnStatus || "completed";
+      current.mode = null;
+      current.retryQueue = [];
+      current.retryReturnStatus = null;
+      current.currentDate = null;
+    }
+    current.updatedAt = new Date().toISOString();
+    return current;
+  });
+
+  if (matchesActiveRun(updated, jobId, runToken)) scheduleNext(300);
+  else await chrome.alarms.clear(ALARM_NAME);
+}
+
+// Sends to the job's KidsNote tab; if that tab was closed or reloaded away, falls back to any open KidsNote tab.
+async function sendToKidsNoteTab(job, message) {
+  if (job.tabId) {
+    try {
+      return await chrome.tabs.sendMessage(job.tabId, message);
+    } catch (error) {
+      console.warn("Saved KidsNote tab is unavailable", error);
+    }
+  }
+
+  const tabs = await chrome.tabs.query({ url: KIDSNOTE_TAB_URL });
+  for (const tab of tabs) {
+    if (tab.id === job.tabId) continue;
+    try {
+      const response = await chrome.tabs.sendMessage(tab.id, message);
+      await mutateJob((current) => {
+        if (current?.jobId === job.jobId) current.tabId = tab.id;
+        return current;
+      });
+      return response;
+    } catch (error) {
+      console.warn("KidsNote tab did not respond", tab.id, error);
+    }
+  }
+
+  throw new Error("KidsNote 화면을 찾지 못했습니다. KidsNote를 열거나 새로고침한 뒤 이어받기를 눌러주세요.");
 }
 
 async function cancelJob() {
@@ -169,15 +268,20 @@ async function processNextPage() {
     jobId = snapshot.jobId;
     runToken = snapshot.runToken;
 
+    if (snapshot.mode === "retry") {
+      await processRetryBatch(jobId, runToken);
+      return;
+    }
+
     const response = snapshot.type === "album"
-      ? await chrome.tabs.sendMessage(snapshot.tabId, {
+      ? await sendToKidsNoteTab(snapshot, {
           type: "KIDSNOTE_FETCH_ALBUM_PAGE",
           childId: snapshot.childId,
           centerId: snapshot.centerId,
           classId: snapshot.classId,
           page: snapshot.cursor
         })
-      : await chrome.tabs.sendMessage(snapshot.tabId, {
+      : await sendToKidsNoteTab(snapshot, {
           type: "KIDSNOTE_FETCH_PAGE",
           childId: snapshot.childId,
           page: snapshot.cursor
@@ -271,7 +375,7 @@ async function backupReport(report, job, jobId, runToken) {
   const child = sanitize(report.child_name || job.childName || `child-${job.childId}`);
   const date = String(report.date_written || "");
   const root = `KidsNote/${child}`;
-  const countsDelta = { images: 0, metadata: 0, failed: 0 };
+  const countsDelta = { images: 0, metadata: 0, failed: 0, failedDownloads: [] };
   let sequence = Number(job.photoSequenceByDate?.[date] || 0);
 
   if (job.options.photos) {
@@ -288,6 +392,7 @@ async function backupReport(report, job, jobId, runToken) {
     sequence = result.sequence;
     countsDelta.images += result.images;
     countsDelta.failed += result.failed;
+    countsDelta.failedDownloads.push(...result.failedDownloads);
   }
 
   if (!(await isRunActive(jobId, runToken))) return { completed: false };
@@ -319,7 +424,7 @@ async function backupReport(report, job, jobId, runToken) {
 async function backupAlbum(album, date, job, jobId, runToken) {
   const child = sanitize(job.childName || `child-${job.childId}`);
   const root = `KidsNote/${child}/Album/Photos`;
-  const countsDelta = { images: 0, metadata: 0, failed: 0 };
+  const countsDelta = { images: 0, metadata: 0, failed: 0, failedDownloads: [] };
   let sequence = Number(job.photoSequenceByDate?.[date] || 0);
 
   const result = await downloadImages({
@@ -336,6 +441,7 @@ async function backupAlbum(album, date, job, jobId, runToken) {
   sequence = result.sequence;
   countsDelta.images += result.images;
   countsDelta.failed += result.failed;
+  countsDelta.failedDownloads.push(...result.failedDownloads);
 
   return {
     completed: await isRunActive(jobId, runToken),
@@ -346,37 +452,107 @@ async function backupAlbum(album, date, job, jobId, runToken) {
 }
 
 async function downloadImages({ images, date, root, folderMode, sequence, jobId, runToken }) {
-  const list = Array.isArray(images) ? images : [];
-  let imagesSaved = 0;
-  let failed = 0;
+  const list = (Array.isArray(images) ? images : []).filter((image) => image?.original);
+  const photoRoot = folderMode === "flat" ? root : `${root}/${date}`;
   let nextSequence = Number(sequence || 0);
 
-  for (const image of list) {
-    if (!(await isRunActive(jobId, runToken))) {
-      return { completed: false, sequence: nextSequence, images: imagesSaved, failed };
-    }
-    if (!image?.original) continue;
-
+  const entries = list.map((image) => {
     nextSequence += 1;
     const ext = extensionOf(image.original_file_name || image.original) || "jpg";
     const serial = String(nextSequence).padStart(3, "0");
-    const photoRoot = folderMode === "flat" ? root : `${root}/${date}`;
+    return { url: image.original, filename: `${photoRoot}/${date}-${serial}.${ext}` };
+  });
 
-    try {
-      await chrome.downloads.download({
-        url: image.original,
-        filename: `${photoRoot}/${date}-${serial}.${ext}`,
-        conflictAction: "overwrite",
-        saveAs: false
-      });
-      imagesSaved += 1;
-    } catch (error) {
-      console.warn("Image download failed", error);
-      failed += 1;
+  const result = await downloadEntries(entries, jobId, runToken);
+  if (!result.completed) return { completed: false };
+
+  return {
+    completed: true,
+    sequence: nextSequence,
+    images: result.succeeded.length,
+    failed: result.failed.length,
+    failedDownloads: result.failed
+  };
+}
+
+// Runs at most MAX_CONCURRENT_DOWNLOADS downloads at once, each waiting until the file is fully written.
+async function downloadEntries(entries, jobId, runToken) {
+  const succeeded = [];
+  const failed = [];
+  let nextIndex = 0;
+  let cancelled = false;
+
+  async function worker() {
+    while (!cancelled && nextIndex < entries.length) {
+      if (!(await isRunActive(jobId, runToken))) {
+        cancelled = true;
+        return;
+      }
+      if (cancelled || nextIndex >= entries.length) return;
+
+      const entry = entries[nextIndex];
+      nextIndex += 1;
+      if (await downloadWithRetry(entry)) succeeded.push(entry);
+      else failed.push(entry);
     }
   }
 
-  return { completed: true, sequence: nextSequence, images: imagesSaved, failed };
+  const workerCount = Math.min(MAX_CONCURRENT_DOWNLOADS, entries.length);
+  await Promise.all(Array.from({ length: workerCount }, () => worker()));
+
+  return { completed: !cancelled, succeeded, failed };
+}
+
+async function downloadWithRetry({ url, filename }) {
+  for (let attempt = 0; attempt <= DOWNLOAD_RETRY_LIMIT; attempt += 1) {
+    if (attempt > 0) await delay(DOWNLOAD_RETRY_DELAY_MS * attempt);
+    try {
+      const downloadId = await chrome.downloads.download({
+        url,
+        filename,
+        conflictAction: "overwrite",
+        saveAs: false
+      });
+      if ((await waitForDownload(downloadId)) !== "interrupted") return true;
+      console.warn("Image download interrupted", { url, attempt });
+    } catch (error) {
+      console.warn("Image download failed", { url, attempt }, error);
+    }
+  }
+  return false;
+}
+
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// Resolves with "complete" or "interrupted", or "timeout" if the download is still running after the wait limit.
+function waitForDownload(downloadId) {
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (state) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      chrome.downloads.onChanged.removeListener(onChanged);
+      resolve(state);
+    };
+    const onChanged = (delta) => {
+      if (delta.id !== downloadId) return;
+      const state = delta.state?.current;
+      if (state === "complete" || state === "interrupted") finish(state);
+    };
+    const timer = setTimeout(() => {
+      console.warn("Image download still running after wait limit", downloadId);
+      finish("timeout");
+    }, DOWNLOAD_WAIT_TIMEOUT_MS);
+
+    chrome.downloads.onChanged.addListener(onChanged);
+    // The download may have finished before the listener was attached.
+    chrome.downloads.search({ id: downloadId }).then(([item]) => {
+      if (item?.state === "complete" || item?.state === "interrupted") finish(item.state);
+    }).catch(() => {});
+  });
 }
 
 async function saveMetadataFile(filename, text, type) {
@@ -433,6 +609,9 @@ async function commitItemProgress(jobId, runToken, item, date, result) {
       current.counts.images += result.countsDelta.images;
       current.counts.metadata += result.countsDelta.metadata;
       current.counts.failed += result.countsDelta.failed;
+      if (result.countsDelta.failedDownloads.length > 0) {
+        current.failedDownloads = [...(current.failedDownloads || []), ...result.countsDelta.failedDownloads];
+      }
       current.photoSequenceByDate = current.photoSequenceByDate || {};
       current.photoSequenceByDate[date] = result.sequence;
       if (result.childName && !current.childName) current.childName = result.childName;
