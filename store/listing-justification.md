@@ -17,9 +17,6 @@
 ### 호스트 권한: https://*.kidsnote.com/*
 KidsNote 페이지에서 사용자의 로그인 세션으로 알림장·앨범 목록을 조회하고, 자녀·원·반 정보를 감지하며, 현재 탭이 KidsNote인지 확인하는 데 사용합니다. 다른 사이트에는 접근하지 않습니다.
 
-### 호스트 권한: https://up-kids-kage.kakao.com/*
-KidsNote가 첨부 사진을 제공하는 저장소 도메인입니다. API가 알려 준 원본 사진 URL을 내려받는 데만 사용합니다.
-
 ### 콘텐츠 스크립트: https://www.kidsnote.com/*
 KidsNote 화면에서 자녀 정보를 감지하고, 필요하면 추억보기로 전환하며, 로그인 세션으로 목록 API를 호출합니다.
 
@@ -45,9 +42,6 @@ Processes list pages in separate steps so a long backup can continue after the s
 
 ### Host permission: https://*.kidsnote.com/*
 Used to read report and album lists with the user's signed-in session, detect child, center, and class information, and confirm the current tab is KidsNote. No other sites are accessed.
-
-### Host permission: https://up-kids-kage.kakao.com/*
-Storage domain where KidsNote serves attached photos. Used only to download the original photo URLs returned by the KidsNote API.
 
 ### Content script: https://www.kidsnote.com/*
 Detects child information on KidsNote pages, switches to the memory view when needed, and calls the list API with the user's signed-in session.
