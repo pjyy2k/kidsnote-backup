@@ -10,6 +10,7 @@ Chrome/Edge Manifest V3 확장프로그램으로, 로그인된 KidsNote 세션�
 - 목록 요청은 `page_size=99999`를 사용해 페이지 이동을 최대한 줄임
 - 서버가 `next` cursor를 반환하면 해당 값을 다음 요청의 `page` 파라미터로 그대로 사용
 - `attached_images[].original` 원본 사진 다운로드
+- `attached_video.high` 동영상 다운로드 (`Videos` 폴더, 동영상만 선택해 받기 가능)
 - 사진 저장 방식을 **날짜별 폴더** 또는 **한 폴더에 모두 저장** 중 선택
 - 사진 파일명은 `yyyy-mm-dd-일련번호` 형식으로 저장
 - 알림장 Markdown과 JSON 저장

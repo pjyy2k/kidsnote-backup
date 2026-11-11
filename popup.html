@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>KidsNote Backup</title>
   <style>
-    body{font-family:sans-serif;min-width:390px;margin:0;background:#f6f7f9;color:#222}.app{padding:16px}.panel{padding:12px;border:1px solid #ddd;border-radius:10px;margin-bottom:12px;background:#fff}h1{margin:0 0 4px}.step-title{display:flex;align-items:center;gap:8px;margin:0 0 8px;font-size:14px}.step-badge{display:inline-flex;width:24px;height:24px;border-radius:50%;align-items:center;justify-content:center;background:#2563eb;color:#fff;font-size:12px;font-weight:700}.inline,.actions,.backup-actions{display:flex;gap:8px}.inline input{flex:1}.dates,.stats{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:12px}.stats{grid-template-columns:repeat(4,1fr)}label{font-size:13px;font-weight:600}input{box-sizing:border-box;width:100%;padding:8px;border:1px solid #ccc;border-radius:7px}fieldset{border:0;padding:0;margin:14px 0}legend{font-size:13px;font-weight:700;margin-bottom:7px}.check,.radio{font-weight:400;margin-right:10px;display:inline-flex;align-items:center;gap:5px}.check input,.radio input{width:auto}button{padding:8px 10px;border:0;border-radius:7px;cursor:pointer}.primary{background:#2563eb;color:#fff;font-weight:700}.album-primary{background:#0f766e;color:#fff;font-weight:700}.full{width:100%}.secondary{background:#eef2f6}.danger{background:#fee4e2;color:#b42318}.status-row{display:flex;justify-content:space-between;padding:3px 0;font-size:13px}.stats div{text-align:center;background:#f8fafc;padding:8px;border-radius:7px}.stats span,.hint,header p,footer{color:#667085;font-size:11px}.stats strong{display:block;font-size:16px}.actions button,.backup-actions button{flex:1}.error{background:#fff1f0;color:#b42318;padding:8px;border-radius:7px;font-size:12px}.folder-example{margin:7px 0 0;padding:8px;background:#f8fafc;border-radius:7px;font-family:monospace;font-size:11px;line-height:1.5;color:#475467;white-space:pre-line}.wait-notice{margin:10px 0 0;padding:9px 10px;border-radius:8px;background:#fffaeb;color:#7a5d00;font-size:11px;line-height:1.5}.album-note{margin:8px 0 0;padding:9px 10px;border-radius:8px;background:#ecfdf3;color:#166534;font-size:11px;line-height:1.5}.retry-btn{margin-top:8px}.version{margin-top:4px;color:#98a2b3;font-size:10px}footer{text-align:center}
+    body{font-family:sans-serif;min-width:390px;margin:0;background:#f6f7f9;color:#222}.app{padding:16px}.panel{padding:12px;border:1px solid #ddd;border-radius:10px;margin-bottom:12px;background:#fff}h1{margin:0 0 4px}.step-title{display:flex;align-items:center;gap:8px;margin:0 0 8px;font-size:14px}.step-badge{display:inline-flex;width:24px;height:24px;border-radius:50%;align-items:center;justify-content:center;background:#2563eb;color:#fff;font-size:12px;font-weight:700}.inline,.actions,.backup-actions{display:flex;gap:8px}.inline input{flex:1}.dates,.stats{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:12px}.stats{grid-template-columns:repeat(5,1fr)}label{font-size:13px;font-weight:600}input{box-sizing:border-box;width:100%;padding:8px;border:1px solid #ccc;border-radius:7px}fieldset{border:0;padding:0;margin:14px 0}legend{font-size:13px;font-weight:700;margin-bottom:7px}.check,.radio{font-weight:400;margin-right:10px;display:inline-flex;align-items:center;gap:5px}.check input,.radio input{width:auto}button{padding:8px 10px;border:0;border-radius:7px;cursor:pointer}.primary{background:#2563eb;color:#fff;font-weight:700}.album-primary{background:#0f766e;color:#fff;font-weight:700}.full{width:100%}.secondary{background:#eef2f6}.danger{background:#fee4e2;color:#b42318}.status-row{display:flex;justify-content:space-between;padding:3px 0;font-size:13px}.stats div{text-align:center;background:#f8fafc;padding:8px;border-radius:7px}.stats span,.hint,header p,footer{color:#667085;font-size:11px}.stats strong{display:block;font-size:16px}.actions button,.backup-actions button{flex:1}.error{background:#fff1f0;color:#b42318;padding:8px;border-radius:7px;font-size:12px}.folder-example{margin:7px 0 0;padding:8px;background:#f8fafc;border-radius:7px;font-family:monospace;font-size:11px;line-height:1.5;color:#475467;white-space:pre-line}.wait-notice{margin:10px 0 0;padding:9px 10px;border-radius:8px;background:#fffaeb;color:#7a5d00;font-size:11px;line-height:1.5}.album-note{margin:8px 0 0;padding:9px 10px;border-radius:8px;background:#ecfdf3;color:#166534;font-size:11px;line-height:1.5}.retry-btn{margin-top:8px}.version{margin-top:4px;color:#98a2b3;font-size:10px}footer{text-align:center}
   </style>
 </head>
 <body>
@@ -40,10 +40,12 @@
       </div>
 
       <fieldset>
-        <legend>알림장 백업 항목</legend>
+        <legend>백업 항목</legend>
         <label class="check"><input id="photos" type="checkbox" checked> 원본 사진</label>
+        <label class="check"><input id="videos" type="checkbox" checked> 동영상</label>
         <label class="check"><input id="json" type="checkbox" checked> JSON</label>
         <label class="check"><input id="markdown" type="checkbox" checked> 일기(Markdown)</label>
+        <p class="hint">JSON·일기는 알림장에만 적용됩니다. 동영상만 받으려면 동영상만 체크하세요.</p>
       </fieldset>
 
       <fieldset>
@@ -57,7 +59,7 @@
         <button id="startReportBtn" type="button" class="primary">알림장 다운로드</button>
         <button id="startAlbumBtn" type="button" class="album-primary">앨범 다운로드</button>
       </div>
-      <p class="album-note">앨범 다운로드는 앨범 게시물의 <b>원본 사진</b>을 일괄 저장합니다. 알림장 사진과 섞이지 않도록 Album 폴더에 별도로 저장됩니다.</p>
+      <p class="album-note">앨범 다운로드는 앨범 게시물의 <b>원본 사진과 동영상</b>을 일괄 저장합니다. 알림장 사진과 섞이지 않도록 Album 폴더에 별도로 저장됩니다.</p>
       <p class="wait-notice">오래전 알림장/앨범 사진을 백업하는 경우 해당 날짜까지 탐색하는 데 시간이 다소 걸릴 수 있습니다. 진행이 멈춘 것처럼 보여도 잠시 기다려 주세요.</p>
     </section>
 
@@ -69,6 +71,7 @@
         <div><span>페이지</span><strong id="pages">0</strong></div>
         <div><span id="itemsLabel">항목</span><strong id="items">0</strong></div>
         <div><span>사진</span><strong id="images">0</strong></div>
+        <div><span>동영상</span><strong id="videos-count">0</strong></div>
         <div><span>실패</span><strong id="failed">0</strong></div>
       </div>
       <p id="error" class="error" hidden></p>

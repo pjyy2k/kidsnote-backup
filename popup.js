@@ -119,7 +119,8 @@ async function startBackup(type) {
     startDate: el("startDate").value,
     endDate: el("endDate").value,
     options: {
-      photos: type === "album" ? true : el("photos").checked,
+      photos: el("photos").checked,
+      videos: el("videos").checked,
       json: type === "report" ? el("json").checked : false,
       markdown: type === "report" ? el("markdown").checked : false,
       photoFolderMode: selectedPhotoFolderMode()
@@ -152,9 +153,9 @@ function selectedPhotoFolderMode() {
 
 function updateFolderExample() {
   if (selectedPhotoFolderMode() === "flat") {
-    el("folderExample").textContent = "알림장: Photos/2026-10-21-001.jpg\n앨범: Album/Photos/2026-10-21-001.jpg";
+    el("folderExample").textContent = "알림장: Photos/2026-10-21-001.jpg\n앨범: Album/Photos/2026-10-21-001.jpg\n동영상: Videos/2026-10-21-video-123.mp4";
   } else {
-    el("folderExample").textContent = "알림장: Photos/2026-10-21/2026-10-21-001.jpg\n앨범: Album/Photos/2026-10-21/2026-10-21-001.jpg";
+    el("folderExample").textContent = "알림장: Photos/2026-10-21/2026-10-21-001.jpg\n앨범: Album/Photos/2026-10-21/2026-10-21-001.jpg\n동영상: Videos/2026-10-21/2026-10-21-video-123.mp4";
   }
 }
 
@@ -178,6 +179,7 @@ function render(job) {
   el("itemsLabel").textContent = type === "album" ? "앨범" : "알림장";
   el("items").textContent = type === "album" ? (counts.albums || 0) : (counts.reports || 0);
   el("images").textContent = counts.images || 0;
+  el("videos-count").textContent = counts.videos || 0;
   el("failed").textContent = counts.failed || 0;
 
   if (job?.error) showError(job.error); else clearError();

@@ -6,6 +6,9 @@ const DOWNLOAD_RETRY_LIMIT = 2;
 const DOWNLOAD_RETRY_DELAY_MS = 2000;
 const RETRY_BATCH_SIZE = 30;
 const KIDSNOTE_TAB_URL = "https://www.kidsnote.com/*";
+// Saved extensions are limited to media types so an upload can't land on disk as .html/.exe.
+const IMAGE_EXTENSIONS = /^(jpe?g|png|gif|webp|heic|heif)$/;
+const VIDEO_EXTENSIONS = /^(mp4|m4v|mov|qt|3gp|3g2|webm|mkv|avi|wmv|mpe?g|ts|mts|m2ts)$/;
 
 let mutationQueue = Promise.resolve();
 let processing = false;
@@ -100,9 +103,10 @@ async function startJob(payload) {
     dailyReportRows: [],
     failedDownloads: [],
     mode: null,
-    counts: { pages: 0, reports: 0, albums: 0, images: 0, metadata: 0, failed: 0 },
+    counts: { pages: 0, reports: 0, albums: 0, images: 0, videos: 0, metadata: 0, failed: 0 },
     options: {
-      photos: type === "album" ? true : payload.options?.photos !== false,
+      photos: payload.options?.photos !== false,
+      videos: payload.options?.videos !== false,
       json: type === "report" && payload.options?.json !== false,
       markdown: type === "report" && payload.options?.markdown !== false,
       photoFolderMode: payload.options?.photoFolderMode === "flat" ? "flat" : "date"
@@ -193,7 +197,9 @@ async function processRetryBatch(jobId, runToken) {
     current.retryQueue = (current.retryQueue || []).slice(batch.length);
     current.failedDownloads = (current.failedDownloads || []).filter((entry) => !saved.has(entry.filename));
     current.counts = normalizeCounts(current.counts);
-    current.counts.images += result.succeeded.length;
+    const videos = result.succeeded.filter((entry) => entry.kind === "video").length;
+    current.counts.videos += videos;
+    current.counts.images += result.succeeded.length - videos;
     current.counts.failed = Math.max(0, current.counts.failed - result.succeeded.length);
 
     if (current.retryQueue.length === 0) {
@@ -375,12 +381,12 @@ async function backupReport(report, job, jobId, runToken) {
   const child = sanitize(report.child_name || job.childName || `child-${job.childId}`);
   const date = String(report.date_written || "");
   const root = `KidsNote/${child}`;
-  const countsDelta = { images: 0, metadata: 0, failed: 0, failedDownloads: [] };
+  const countsDelta = { images: 0, videos: 0, metadata: 0, failed: 0, failedDownloads: [] };
   let sequence = Number(job.photoSequenceByDate?.[date] || 0);
 
   if (job.options.photos) {
     const result = await downloadImages({
-      images: report.attached_images,
+      images: splitMedia(report).photos,
       date,
       root: `${root}/Photos`,
       folderMode: job.options.photoFolderMode,
@@ -391,6 +397,21 @@ async function backupReport(report, job, jobId, runToken) {
     if (!result.completed) return { completed: false };
     sequence = result.sequence;
     countsDelta.images += result.images;
+    countsDelta.failed += result.failed;
+    countsDelta.failedDownloads.push(...result.failedDownloads);
+  }
+
+  if (job.options.videos) {
+    const result = await downloadVideos({
+      videos: splitMedia(report).videos,
+      date,
+      root: `${root}/Videos`,
+      folderMode: job.options.photoFolderMode,
+      jobId,
+      runToken
+    });
+    if (!result.completed) return { completed: false };
+    countsDelta.videos += result.videos;
     countsDelta.failed += result.failed;
     countsDelta.failedDownloads.push(...result.failedDownloads);
   }
@@ -423,25 +444,41 @@ async function backupReport(report, job, jobId, runToken) {
 
 async function backupAlbum(album, date, job, jobId, runToken) {
   const child = sanitize(job.childName || `child-${job.childId}`);
-  const root = `KidsNote/${child}/Album/Photos`;
-  const countsDelta = { images: 0, metadata: 0, failed: 0, failedDownloads: [] };
+  const root = `KidsNote/${child}/Album`;
+  const countsDelta = { images: 0, videos: 0, metadata: 0, failed: 0, failedDownloads: [] };
   let sequence = Number(job.photoSequenceByDate?.[date] || 0);
 
-  const result = await downloadImages({
-    images: album.attached_images,
-    date,
-    root,
-    folderMode: job.options.photoFolderMode,
-    sequence,
-    jobId,
-    runToken
-  });
+  if (job.options.photos) {
+    const result = await downloadImages({
+      images: splitMedia(album).photos,
+      date,
+      root: `${root}/Photos`,
+      folderMode: job.options.photoFolderMode,
+      sequence,
+      jobId,
+      runToken
+    });
+    if (!result.completed) return { completed: false };
+    sequence = result.sequence;
+    countsDelta.images += result.images;
+    countsDelta.failed += result.failed;
+    countsDelta.failedDownloads.push(...result.failedDownloads);
+  }
 
-  if (!result.completed) return { completed: false };
-  sequence = result.sequence;
-  countsDelta.images += result.images;
-  countsDelta.failed += result.failed;
-  countsDelta.failedDownloads.push(...result.failedDownloads);
+  if (job.options.videos) {
+    const result = await downloadVideos({
+      videos: splitMedia(album).videos,
+      date,
+      root: `${root}/Videos`,
+      folderMode: job.options.photoFolderMode,
+      jobId,
+      runToken
+    });
+    if (!result.completed) return { completed: false };
+    countsDelta.videos += result.videos;
+    countsDelta.failed += result.failed;
+    countsDelta.failedDownloads.push(...result.failedDownloads);
+  }
 
   return {
     completed: await isRunActive(jobId, runToken),
@@ -458,7 +495,9 @@ async function downloadImages({ images, date, root, folderMode, sequence, jobId,
 
   const entries = list.map((image) => {
     nextSequence += 1;
-    const ext = extensionOf(image.original_file_name || image.original) || "jpg";
+    // Uploader controls the file name; videos were already split out by splitMedia().
+    const found = extensionOf(image.original_file_name || image.original);
+    const ext = IMAGE_EXTENSIONS.test(found) ? found : "jpg";
     const serial = String(nextSequence).padStart(3, "0");
     return { url: image.original, filename: `${photoRoot}/${date}-${serial}.${ext}` };
   });
@@ -470,6 +509,41 @@ async function downloadImages({ images, date, root, folderMode, sequence, jobId,
     completed: true,
     sequence: nextSequence,
     images: result.succeeded.length,
+    failed: result.failed.length,
+    failedDownloads: result.failed
+  };
+}
+
+// attached_video is a single object ({ id, high, low, ... }) in reports; arrays are accepted too.
+// A video listed in attached_images (by its file name or URL extension) goes to videos instead of photos.
+function splitMedia(item) {
+  const images = Array.isArray(item?.attached_images) ? item.attached_images : [];
+  const attached = Array.isArray(item?.attached_video) ? item.attached_video : [item?.attached_video];
+  const isVideo = (image) => [image?.original_file_name, image?.original].some((value) => VIDEO_EXTENSIONS.test(extensionOf(value)));
+  return {
+    photos: images.filter((image) => !isVideo(image)),
+    videos: [...attached.filter(Boolean), ...images.filter(isVideo)]
+  };
+}
+
+async function downloadVideos({ videos, date, root, folderMode, jobId, runToken }) {
+  const list = (Array.isArray(videos) ? videos : [videos]).filter((video) => video?.high || video?.low || video?.original);
+  const dir = folderMode === "flat" ? root : `${root}/${date}`;
+
+  const entries = list.map((video, index) => {
+    const url = video.high || video.low || video.original;
+    // Prefer the server URL's extension; the file name is only a fallback and must still be a video type.
+    const found = [extensionOf(url), extensionOf(video.original_file_name)].find((ext) => VIDEO_EXTENSIONS.test(ext));
+    const ext = found || "mp4";
+    return { url, filename: `${dir}/${date}-video-${sanitize(video.id ?? index + 1)}.${ext}`, kind: "video" };
+  });
+
+  const result = await downloadEntries(entries, jobId, runToken);
+  if (!result.completed) return { completed: false };
+
+  return {
+    completed: true,
+    videos: result.succeeded.length,
     failed: result.failed.length,
     failedDownloads: result.failed
   };
@@ -607,6 +681,7 @@ async function commitItemProgress(jobId, runToken, item, date, result) {
       if (current.type === "album") current.counts.albums += 1;
       else current.counts.reports += 1;
       current.counts.images += result.countsDelta.images;
+      current.counts.videos += result.countsDelta.videos;
       current.counts.metadata += result.countsDelta.metadata;
       current.counts.failed += result.countsDelta.failed;
       if (result.countsDelta.failedDownloads.length > 0) {
@@ -810,6 +885,9 @@ function validatePayload(payload) {
   if (payload.options?.photoFolderMode && !["date", "flat"].includes(payload.options.photoFolderMode)) {
     throw new Error("사진 저장 방식을 확인하세요.");
   }
+  const o = payload.options || {};
+  const wantsAny = o.photos !== false || o.videos !== false || (payload.type !== "album" && (o.json !== false || o.markdown !== false));
+  if (!wantsAny) throw new Error("백업할 항목을 하나 이상 선택하세요.");
 }
 
 function normalizeCounts(counts = {}) {
@@ -818,6 +896,7 @@ function normalizeCounts(counts = {}) {
     reports: Number(counts.reports || 0),
     albums: Number(counts.albums || 0),
     images: Number(counts.images || 0),
+    videos: Number(counts.videos || 0),
     metadata: Number(counts.metadata || 0),
     failed: Number(counts.failed || 0)
   };
